@@ -1,0 +1,217 @@
+import React from 'react';
+import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
+import { useSubtitles, SubtitleCue } from '../hooks/useSubtitles';
+import { matchSceneStyle, extractHighlightWords, formatSubtitleLines, normalizeDisplayText } from '../utils/keywordMatcher';
+import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
+import type { ContentOverlayConfig } from '../index';
+
+const CREAM = '#FAFAF7';
+const TILE_STRONG = '#E3E9E7';
+const INK = '#151A19';
+
+interface SubtitlesProps {
+  srtPath: string;
+  subtitles?: SubtitleCue[];
+  config: ContentOverlayConfig['subtitles'];
+  layout?: OverlayLayoutConfig;
+  variant?: 'default' | 'hybrid-bottom';
+}
+
+export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config, layout, variant = 'default' }) => {
+  const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
+  const currentTime = frame / fps;
+  const loadedSubtitles = subtitles || useSubtitles(srtPath);
+
+  const currentCue = loadedSubtitles.find(
+    cue => currentTime >= cue.start && currentTime <= cue.end
+  );
+  const currentCueIndex = getActiveCueIndex(loadedSubtitles, currentTime);
+  const overlayLayout = getOverlayLayoutPreset(currentCueIndex, layout);
+  const isHybridBottom = variant === 'hybrid-bottom';
+
+  if (!currentCue) return null;
+
+  const style = matchSceneStyle(currentCue.text);
+  const normalizedText = normalizeDisplayText(currentCue.text);
+  const highlightWords = extractHighlightWords(normalizedText, style)
+    .sort((a, b) => normalizedText.indexOf(a) - normalizedText.indexOf(b));
+  const subtitleLines = formatSubtitleLines(
+    normalizedText,
+    normalizedText.length > config.maxCharsPerLine ? config.maxLines : Math.min(2, config.maxLines),
+    Math.max(10, config.maxCharsPerLine - 1.2)
+  );
+  const longestLineLength = Math.max(...subtitleLines.map((line) => line.length), normalizedText.length);
+  const fontSize = longestLineLength > config.maxCharsPerLine
+    ? config.fontSizeSmall
+    : longestLineLength > 18
+      ? config.fontSizeMedium
+      : config.fontSizeLarge;
+
+  const renderHighlightedLine = (text: string) => {
+    let result: React.ReactNode[] = [];
+    let remaining = text;
+    let keyIndex = 0;
+
+    for (const word of highlightWords) {
+      const idx = remaining.indexOf(word);
+      if (idx !== -1) {
+        if (idx > 0) {
+          result.push(
+            <span key={`n-${keyIndex++}`} style={{ color: isHybridBottom ? '#ffffff' : INK }}>
+              {remaining.slice(0, idx)}
+            </span>
+          );
+        }
+
+        result.push(
+          <span
+            key={`h-${keyIndex++}`}
+            style={{
+              color: style.accentColor,
+              fontWeight: 800,
+              textShadow: 'none',
+            }}
+          >
+            {word}
+          </span>
+        );
+
+        remaining = remaining.slice(idx + word.length);
+      }
+    }
+
+    if (remaining.length > 0) {
+      result.push(
+        <span key={`n-${keyIndex++}`} style={{ color: isHybridBottom ? '#ffffff' : INK }}>
+          {remaining}
+        </span>
+      );
+    }
+
+    return result;
+  };
+
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: isHybridBottom ? 'flex-end' : 'flex-start',
+        alignItems: isHybridBottom ? 'center' : 'flex-start',
+        paddingTop: isHybridBottom ? 0 : overlayLayout.subtitles.top,
+        paddingLeft: isHybridBottom ? 0 : overlayLayout.subtitles.left,
+        paddingBottom: isHybridBottom ? 0 : 0,
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ width: isHybridBottom ? 960 : overlayLayout.subtitles.width, marginBottom: isHybridBottom ? 160 : 0 }}>
+        {!isHybridBottom ? (
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '10px 16px',
+              background: `${CREAM}ee`,
+              borderRadius: 999,
+              border: '1px solid rgba(21,26,25,0.08)',
+              boxShadow: '0 10px 28px rgba(21,26,25,0.08)',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: style.accentColor,
+                boxShadow: `0 0 12px ${style.accentColor}`,
+              }}
+            />
+            <span
+              style={{
+                color: INK,
+                fontSize: 18,
+                fontWeight: 700,
+                letterSpacing: 1.5,
+              }}
+            >
+              {config.headlineLabel} · {style.label}
+            </span>
+          </div>
+        ) : null}
+
+        <div
+          style={{
+            marginTop: isHybridBottom ? 0 : 18,
+            position: 'relative',
+            padding: isHybridBottom ? '18px 36px 28px' : '26px 30px 28px',
+            background: isHybridBottom ? 'rgba(10,10,18,0.88)' : CREAM,
+            borderRadius: isHybridBottom ? 24 : 26,
+            boxShadow: isHybridBottom ? '0 24px 60px rgba(0,0,0,0.55)' : '0 24px 50px rgba(21,26,25,0.08)',
+            border: isHybridBottom ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(21,26,25,0.08)',
+            backdropFilter: 'blur(16px)',
+            textAlign: isHybridBottom ? 'center' : 'left',
+          }}
+        >
+          {!isHybridBottom ? (
+            <div
+              style={{
+                position: 'absolute',
+                left: 30,
+                top: 0,
+                width: 160,
+                height: 5,
+                borderRadius: 999,
+                background: style.accentColor,
+                boxShadow: `0 0 18px ${style.accentColor}60`,
+              }}
+            />
+          ) : null}
+          <div
+            style={{
+              fontFamily: '"Noto Sans SC", "PingFang SC", sans-serif',
+              fontWeight: 900,
+              lineHeight: 1.18,
+              letterSpacing: 0.5,
+              color: isHybridBottom ? '#ffffff' : INK,
+              textAlign: isHybridBottom ? 'center' : 'left',
+              textShadow: isHybridBottom ? '0 2px 24px rgba(0,0,0,0.75)' : 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              width: '100%',
+              overflow: 'visible',
+            }}
+          >
+            {subtitleLines.map((line, index) => (
+              <div
+                key={`${index}-${line}`}
+                style={{
+                  fontSize,
+                  lineHeight: 1.32,
+                  minHeight: fontSize * 1.38,
+                  maxWidth: '100%',
+                  overflow: 'visible',
+                  whiteSpace: 'nowrap',
+                  paddingRight: '0.16em',
+                  boxSizing: 'border-box',
+                }}
+              >
+                {renderHighlightedLine(line)}
+              </div>
+            ))}
+          </div>
+          {!isHybridBottom ? (
+            <div
+              style={{
+                marginTop: 18,
+                height: 1,
+                background: `linear-gradient(90deg, ${style.accentColor}55 0%, ${TILE_STRONG} 100%)`,
+              }}
+            />
+          ) : null}
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};

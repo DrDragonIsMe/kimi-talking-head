@@ -1,0 +1,27 @@
+{
+  "name": "kimi-talking-head",
+  "version": "2.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "remotion preview src/index.tsx",
+    "build": "remotion render src/index.tsx TalkingHeadVideo",
+    "upgrade": "remotion upgrade",
+    "api": "node api/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.1",
+    "@types/web": "^0.0.143",
+    "typescript": "^5.4.5"
+  }
+}

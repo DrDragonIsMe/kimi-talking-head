@@ -1,0 +1,24 @@
+services:
+  talking-head-api:
+    build: .
+    image: kimi-talking-head-api:latest
+    container_name: kimi-talking-head-api
+    ports:
+      - "3456:3456"
+    environment:
+      - PORT=3456
+      - MAX_CONCURRENT=1
+    env_file:
+      - .env
+    volumes:
+      # 输出目录挂载到宿主机，方便取走成片
+      - ./output:/app/output
+      # 配置文件热更新
+      - ./config:/app/config:ro
+      # 素材目录
+      - ./assets:/app/assets:ro
+      # SSH 免密登录远端 TTS / MuseTalk 服务器
+      - ~/.ssh:/root/.ssh:ro
+      # 任务持久化（可选）
+      - ./api/jobs:/app/api/jobs
+    restart: unless-stopped

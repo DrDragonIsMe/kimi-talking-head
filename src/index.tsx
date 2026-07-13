@@ -1,0 +1,521 @@
+import React from 'react';
+import { Composition, AbsoluteFill, OffthreadVideo, Html5Audio, staticFile, useCurrentFrame, registerRoot, Sequence } from 'remotion';
+import { DynamicBackground } from './components/DynamicBackground';
+import { Subtitles } from './components/Subtitles';
+import { TalkingPoints } from './components/TalkingPoints';
+import { DataBars } from './components/DataBars';
+import { QuoteHighlight } from './components/QuoteHighlight';
+import { ProductEndcard } from './components/ProductEndcard';
+import { LogoWatermark } from './components/LogoWatermark';
+import { TitleCard } from './components/TitleCard';
+import { PortraitHybridLayout } from './components/PortraitHybridLayout';
+import { ProductLaunchLayout } from './components/ProductLaunchLayout';
+import type { Chapter } from './components/ProgressBreadcrumb';
+import { ContentInteractionPreview } from './components/ContentInteractionPreview';
+import { SubtitleCue } from './hooks/useSubtitles';
+import { DEFAULT_OVERLAY_LAYOUT_CONFIG, getActiveCueIndex, getOverlayLayoutPreset } from './utils/overlayLayout';
+import type { VideoTemplate } from './themes';
+import { getTheme } from './themes';
+
+export interface SceneVisual {
+  start: number;
+  end: number;
+  path: string;
+  provider: string;
+  prompt?: string;
+  query?: string;
+  text?: string;
+  sourceUrl?: string;
+  license?: string;
+  author?: string;
+  attributionRequired?: boolean;
+}
+
+export interface DataBarItem {
+  label: string;
+  value: string;
+  percent: number;
+}
+
+export interface QuoteHighlightData {
+  quote: string;
+  author: string;
+  context?: string;
+}
+
+export interface VideoLayoutConfig {
+  mode: 'talking-head' | 'portrait-hybrid';
+  template?: VideoTemplate;
+  talking_head?: {
+    hostPosition?: string;
+    hostWindowWidth?: number;
+    hostWindowHeight?: number;
+    hostBorderRadius?: number;
+    showSubtitles?: boolean;
+    showTalkingPoints?: boolean;
+    showDataBars?: boolean;
+    showQuoteHighlight?: boolean;
+  };
+  hybrid?: {
+    mainVisualRatio?: number;
+    mainVisualBorderRadius?: number;
+    hostPosition?: string;
+    hostWindowWidth?: number;
+    hostWindowHeight?: number;
+    hostBorderRadius?: number;
+    showSubtitles?: boolean;
+    showTalkingPoints?: boolean;
+    showDataBars?: boolean;
+    showQuoteHighlight?: boolean;
+    topicTag?: {
+      enabled?: boolean;
+      label?: string;
+      position?: string;
+    };
+    brandBadge?: {
+      enabled?: boolean;
+      position?: string;
+      text?: string;
+    };
+  };
+}
+
+export interface ContentOverlayConfig {
+  subtitles: {
+    maxLines: number;
+    maxCharsPerLine: number;
+    fontSizeLarge: number;
+    fontSizeMedium: number;
+    fontSizeSmall: number;
+    headlineLabel: string;
+    segmentation: {
+      maxSegmentSeconds: number;
+      minSegmentSeconds: number;
+      maxVisualLength: number;
+    };
+  };
+  talkingPoints: {
+    enabled: boolean;
+    maxItems: number;
+    mainLabel: string;
+    secondaryLabel: string;
+  };
+  dataBars: {
+    enabled: boolean;
+    maxItems: number;
+    label: string;
+    fallbackItems: DataBarItem[];
+  };
+  quoteHighlight: {
+    enabled: boolean;
+    label: string;
+    fallbackQuote: string;
+    fallbackAuthor: string;
+  };
+  layout: {
+    sequence: string[];
+    holdCues: number;
+  };
+}
+
+export type { Chapter } from './components/ProgressBreadcrumb';
+
+export interface CoverMeta {
+  summary?: string;
+  insight?: string;
+  stats?: Array<{
+    label: string;
+    value: string;
+  }>;
+}
+
+export const DEFAULT_CONTENT_OVERLAY: ContentOverlayConfig = {
+  subtitles: {
+    maxLines: 3,
+    maxCharsPerLine: 24,
+    fontSizeLarge: 56,
+    fontSizeMedium: 48,
+    fontSizeSmall: 40,
+    headlineLabel: '零距离看懂财经',
+    segmentation: {
+      maxSegmentSeconds: 3.2,
+      minSegmentSeconds: 0.9,
+      maxVisualLength: 26,
+    },
+  },
+  talkingPoints: {
+    enabled: true,
+    maxItems: 2,
+    mainLabel: '观点拆解',
+    secondaryLabel: 'SUPPORTING POINT',
+  },
+  dataBars: {
+    enabled: true,
+    maxItems: 5,
+    label: '数据条',
+    fallbackItems: [],
+  },
+  quoteHighlight: {
+    enabled: true,
+    label: '引用高亮',
+    fallbackQuote: '',
+    fallbackAuthor: '',
+  },
+  layout: DEFAULT_OVERLAY_LAYOUT_CONFIG,
+};
+
+export const RemotionRoot: React.FC = () => {
+  return (
+    <>
+      <Composition
+        id="TalkingHeadVideo"
+        component={TalkingHeadVideo}
+        calculateMetadata={({props}) => {
+          const typedProps = props as {
+            totalDurationFrames?: number;
+            titleCardDurationFrames?: number;
+            talkingDurationFrames?: number;
+            endcardDurationFrames?: number;
+          };
+
+          const fallbackDuration =
+            (typedProps.titleCardDurationFrames ?? 60) +
+            (typedProps.talkingDurationFrames ?? 600) +
+            (typedProps.endcardDurationFrames ?? 180);
+
+          return {
+            durationInFrames: typedProps.totalDurationFrames ?? fallbackDuration,
+          };
+        }}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={{
+          audioPath: 'audio.wav',
+          srtPath: 'subtitles.srt',
+          subtitles: [],
+          hostVideoPath: 'host_video.mp4',
+          title: '视频标题',
+          subtitle: '',
+          brand: '薪灵AI',
+          tagline: '薪人薪事的AI引擎',
+          pills: ['文章转视频', '声音克隆', '唇形同步', '自动字幕'],
+          features: [],
+          slogan: '',
+          cta: '',
+          coverMeta: {
+            summary: '',
+            insight: '',
+            stats: [],
+          },
+          sceneVisuals: [],
+          dataBars: [],
+          quoteHighlight: null,
+          chapters: [],
+          contentOverlay: DEFAULT_CONTENT_OVERLAY,
+          videoLayout: {
+            mode: 'portrait-hybrid',
+            template: 'editorial',
+            hybrid: {
+              mainVisualRatio: 0.58,
+              hostWindowWidth: 560,
+              hostWindowHeight: 640,
+              showSubtitles: true,
+              showTalkingPoints: true,
+              topicTag: { enabled: true, label: '核心解读' },
+              brandBadge: { enabled: true },
+            },
+          },
+          titleCardDurationFrames: 60,
+          talkingDurationFrames: 600,
+          endcardDurationFrames: 180,
+          totalDurationFrames: 840,
+          primaryColor: '#00b498',
+          secondaryColor: '#00d4c8',
+        }}
+      />
+      <Composition
+        id="ContentInteractionPreview"
+        component={ContentInteractionPreview}
+        fps={30}
+        width={1080}
+        height={1920}
+        durationInFrames={1}
+        defaultProps={{
+          hostVideoPath: 'host_video.mp4',
+          sceneVisuals: [],
+          subtitles: [],
+        }}
+      />
+    </>
+  );
+};
+
+const TalkingHeadVideo: React.FC<{
+  audioPath: string;
+  srtPath: string;
+  subtitles: SubtitleCue[];
+  hostVideoPath: string;
+  title: string;
+  subtitle: string;
+  brand: string;
+  tagline: string;
+  slogan?: string | string[];
+  cta?: string;
+  pills: string[];
+  features?: string[];
+  coverMeta?: CoverMeta;
+  sceneVisuals: SceneVisual[];
+  dataBars: DataBarItem[];
+  quoteHighlight: QuoteHighlightData | null;
+  chapters?: Chapter[];
+  contentOverlay?: ContentOverlayConfig;
+  videoLayout?: VideoLayoutConfig;
+  template?: VideoTemplate;
+  titleCardDurationFrames: number;
+  talkingDurationFrames: number;
+  endcardDurationFrames: number;
+  totalDurationFrames: number;
+  primaryColor: string;
+  secondaryColor: string;
+}> = ({
+  audioPath,
+  srtPath,
+  subtitles,
+  hostVideoPath,
+  title,
+  subtitle,
+  brand,
+  tagline,
+  slogan,
+  cta,
+  pills,
+  features = [],
+  coverMeta,
+  sceneVisuals,
+  dataBars,
+  quoteHighlight,
+  chapters,
+  contentOverlay = DEFAULT_CONTENT_OVERLAY,
+  videoLayout = { mode: 'talking-head' },
+  template = 'editorial',
+  titleCardDurationFrames,
+  talkingDurationFrames,
+  endcardDurationFrames,
+  primaryColor,
+  secondaryColor,
+}) => {
+  const frame = useCurrentFrame();
+  const talkingStartFrame = titleCardDurationFrames;
+  const endcardStartFrame = talkingStartFrame + talkingDurationFrames;
+
+  const isTitleCard = frame < talkingStartFrame;
+  const isEndcard = frame >= endcardStartFrame;
+  const isHybrid = videoLayout.mode === 'portrait-hybrid';
+  const isProductLaunch = template === 'product-launch' || videoLayout.template === 'product-launch';
+  const theme = getTheme(isProductLaunch ? 'product-launch' : 'editorial');
+
+  return (
+    <AbsoluteFill style={{ background: '#FAFAF7' }}>
+      {/* Audio starts after title card */}
+      <Sequence from={talkingStartFrame}>
+        <Html5Audio src={staticFile(audioPath)} />
+      </Sequence>
+
+      {isTitleCard ? (
+        <TitleCard
+          title={title}
+          subtitle={subtitle}
+          durationFrames={titleCardDurationFrames}
+          primaryColor={primaryColor}
+          secondaryColor={secondaryColor}
+          brand={brand}
+          tagline={tagline}
+          pills={pills}
+          coverMeta={coverMeta}
+          hostVideoPath={hostVideoPath}
+          template={isProductLaunch ? 'product-launch' : 'editorial'}
+          theme={theme}
+          sceneVisuals={sceneVisuals}
+          features={features}
+        />
+      ) : !isEndcard ? (
+        isProductLaunch ? (
+          <ProductLaunchLayout
+            audioPath={audioPath}
+            srtPath={srtPath}
+            subtitles={subtitles}
+            hostVideoPath={hostVideoPath}
+            sceneVisuals={sceneVisuals}
+            features={features}
+            theme={theme}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+          />
+        ) : isHybrid ? (
+          <PortraitHybridLayout
+            audioPath={audioPath}
+            srtPath={srtPath}
+            subtitles={subtitles}
+            hostVideoPath={hostVideoPath}
+            sceneVisuals={sceneVisuals}
+            contentOverlay={contentOverlay}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+            brand={brand}
+            tagline={tagline}
+            title={title}
+            chapters={chapters}
+            hybridConfig={videoLayout.hybrid}
+          />
+        ) : (
+          <TalkingHeadClassicLayout
+            srtPath={srtPath}
+            subtitles={subtitles}
+            hostVideoPath={hostVideoPath}
+            sceneVisuals={sceneVisuals}
+            dataBars={dataBars}
+            quoteHighlight={quoteHighlight}
+            contentOverlay={contentOverlay}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+          />
+        )
+      ) : (
+        <ProductEndcard
+          startFrame={endcardStartFrame}
+          durationFrames={endcardDurationFrames}
+          brand={brand}
+          tagline={tagline}
+          slogan={slogan || ['把人力数据', '变成组织决策']}
+          cta={cta || '看薪灵如何重构你的人力系统'}
+          pills={pills}
+          primaryColor={primaryColor}
+          secondaryColor={secondaryColor}
+          theme={isProductLaunch ? theme : undefined}
+        />
+      )}
+
+      {!isTitleCard && !isEndcard && !isHybrid ? <LogoWatermark /> : null}
+    </AbsoluteFill>
+  );
+};
+
+const TalkingHeadClassicLayout: React.FC<{
+  srtPath: string;
+  subtitles: SubtitleCue[];
+  hostVideoPath: string;
+  sceneVisuals: SceneVisual[];
+  dataBars: DataBarItem[];
+  quoteHighlight: QuoteHighlightData | null;
+  chapters?: Chapter[];
+  contentOverlay?: ContentOverlayConfig;
+  primaryColor: string;
+  secondaryColor: string;
+}> = ({
+  srtPath,
+  subtitles,
+  hostVideoPath,
+  sceneVisuals,
+  dataBars,
+  quoteHighlight,
+  contentOverlay = DEFAULT_CONTENT_OVERLAY,
+}) => {
+  const frame = useCurrentFrame();
+  const currentTime = frame / 30;
+  const currentCueIndex = getActiveCueIndex(subtitles, currentTime);
+  const overlayLayout = getOverlayLayoutPreset(currentCueIndex, contentOverlay.layout);
+
+  return (
+    <>
+      <DynamicBackground
+        srtPath={srtPath}
+        subtitles={subtitles}
+        sceneVisuals={sceneVisuals}
+        layout={contentOverlay.layout}
+      />
+
+      <div
+        style={{
+          position: 'absolute',
+          left: overlayLayout.hostWindow.left,
+          top: overlayLayout.hostWindow.top,
+          width: overlayLayout.hostWindow.width,
+          height: overlayLayout.hostWindow.height,
+          borderRadius: 28,
+          overflow: 'hidden',
+          background: '#EDF1F0',
+          border: '1px solid rgba(21,26,25,0.08)',
+          boxShadow: '0 22px 40px rgba(21,26,25,0.08)',
+        }}
+      >
+        <OffthreadVideo
+          src={staticFile(hostVideoPath)}
+          muted
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'linear-gradient(180deg, rgba(250,250,247,0.02) 0%, rgba(21,26,25,0.04) 45%, rgba(21,26,25,0.18) 100%)',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            left: 18,
+            top: 18,
+            padding: '8px 12px',
+            borderRadius: 999,
+            background: 'rgba(250,250,247,0.9)',
+            color: '#151A19',
+            fontSize: 15,
+            fontWeight: 700,
+            letterSpacing: 1,
+            border: '1px solid rgba(21,26,25,0.08)',
+          }}
+        >
+          核心解读
+        </div>
+      </div>
+
+      {/* 字幕与知识观点卡片内容有重叠，暂时不渲染字幕，保留 Subtitles 组件源码 */}
+      {/* <Subtitles
+        srtPath={srtPath}
+        subtitles={subtitles}
+        config={contentOverlay.subtitles}
+        layout={contentOverlay.layout}
+      /> */}
+
+      <TalkingPoints
+        srtPath={srtPath}
+        subtitles={subtitles}
+        config={contentOverlay.talkingPoints}
+        layout={contentOverlay.layout}
+      />
+
+      <DataBars
+        srtPath={srtPath}
+        subtitles={subtitles}
+        items={dataBars}
+        config={contentOverlay.dataBars}
+        layout={contentOverlay.layout}
+      />
+
+      <QuoteHighlight
+        srtPath={srtPath}
+        subtitles={subtitles}
+        data={quoteHighlight}
+        config={contentOverlay.quoteHighlight}
+        layout={contentOverlay.layout}
+      />
+    </>
+  );
+};
+
+registerRoot(RemotionRoot);

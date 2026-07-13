@@ -1,0 +1,30 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Local configuration with secrets / server addresses
+config/host_profile.json
+config/servers.json
+
+# Dependencies
+node_modules/
+
+# Build outputs
+output/
+out/
+temp/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Logs
+*.log
+.playwright-mcp/

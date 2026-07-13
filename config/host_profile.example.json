@@ -1,0 +1,158 @@
+{
+  "host": {
+    "name": "默认主播",
+    "photo_source": "assets/host/me.jpg",
+    "position": "center",
+    "display_size": { "width": 720, "height": 960 },
+    "border_radius": 24
+  },
+  "voice": {
+    "engine": "indextts",
+    "reference_audio": "assets/voice/me.m4a",
+    "speed": 1.0,
+    "pitch": 0,
+    "emotion": "neutral",
+    "format": "wav"
+  },
+  "musetalk": {
+    "enable": true,
+    "lip_quality": "high",
+    "face_enhance": true,
+    "bbox_shift": 0
+  },
+  "product": {
+    "brand": "薪灵AI",
+    "tagline": "薪人薪事的AI引擎",
+    "slogan": "把人力数据，变成组织决策",
+    "cta": "看薪灵如何重构你的人力系统",
+    "pills": ["预测离职", "智能定薪", "组织诊断", "人才画像", "合规风控"],
+    "primary_color": "#00b498",
+    "secondary_color": "#00d4c8",
+    "accent_color": "#00b498",
+    "bg_gradient": ["#0a0a1a", "#0a1a16"]
+  },
+  "title_card": {
+    "title": "",
+    "subtitle": "",
+    "duration_seconds": 2
+  },
+  "style": {
+    "theme": "dark",
+    "subtitle_font": "Noto Sans SC",
+    "subtitle_size": 44,
+    "subtitle_weight": 700,
+    "subtitle_position": "bottom",
+    "highlight_style": "neon",
+    "highlight_color": "#00b498",
+    "inactive_color": "rgba(255,255,255,0.35)",
+    "bgm_volume": 0.12,
+    "endcard_duration_seconds": 6
+  },
+  "content_overlay": {
+    "subtitles": {
+      "maxLines": 3,
+      "maxCharsPerLine": 24,
+      "fontSizeLarge": 56,
+      "fontSizeMedium": 48,
+      "fontSizeSmall": 40,
+      "headlineLabel": "零距离用薪灵",
+      "segmentation": {
+        "maxSegmentSeconds": 3.2,
+        "minSegmentSeconds": 0.9,
+        "maxVisualLength": 26
+      }
+    },
+    "talkingPoints": {
+      "enabled": true,
+      "maxItems": 2,
+      "mainLabel": "观点拆解",
+      "secondaryLabel": "SUPPORTING POINT"
+    },
+    "dataBars": {
+      "enabled": true,
+      "maxItems": 5,
+      "label": "数据条",
+      "fallbackItems": []
+    },
+    "quoteHighlight": {
+      "enabled": true,
+      "label": "引用高亮",
+      "fallbackQuote": "",
+      "fallbackAuthor": ""
+    },
+    "layout": {
+      "sequence": ["editorial-left", "editorial-right", "editorial-balanced"],
+      "holdCues": 3
+    }
+  },
+  "scene_visuals": {
+    "providers": ["pexels", "unsplash", "wanx", "placeholder"],
+    "pexels": {
+      "api_key": "your-pexels-api-key",
+      "orientation": "portrait"
+    },
+    "unsplash": {
+      "access_key": "",
+      "orientation": "portrait"
+    },
+    "wanx": {
+      "model": "doubao-seedream-3-0",
+      "size": "1024x1024"
+    },
+    "llm": {
+      "enabled": true,
+      "provider": "kimi",
+      "max_tokens": 1200,
+      "concurrency": 3,
+      "max_retries": 2,
+      "cache": true,
+      "timeout_ms": 120000,
+      "prompt_template": ""
+    }
+  },
+  "template": "editorial",
+  "video_layout": {
+    "mode": "portrait-hybrid",
+    "template": "editorial",
+    "talking_head": {
+      "hostPosition": "bottom-center",
+      "hostWindowWidth": 952,
+      "hostWindowHeight": 820,
+      "hostBorderRadius": 28,
+      "showSubtitles": false,
+      "showTalkingPoints": true,
+      "showDataBars": true,
+      "showQuoteHighlight": true
+    },
+    "hybrid": {
+      "mainVisualRatio": 0.58,
+      "mainVisualBorderRadius": 0,
+      "hostPosition": "bottom-center",
+      "hostWindowWidth": 560,
+      "hostWindowHeight": 640,
+      "hostBorderRadius": 28,
+      "showSubtitles": true,
+      "showTalkingPoints": false,
+      "showProgressBreadcrumb": true,
+      "showChapterCards": true,
+      "showDataBars": false,
+      "showQuoteHighlight": false,
+      "topicTag": {
+        "enabled": true,
+        "label": "薪人薪事 CEO",
+        "position": "top-left"
+      },
+      "brandBadge": {
+        "enabled": true,
+        "position": "bottom-right",
+        "text": "薪灵AI"
+      }
+    }
+  },
+  "output": {
+    "resolution": "1080x1920",
+    "fps": 30,
+    "bitrate": "8M",
+    "codec": "h264"
+  }
+}
