@@ -39,7 +39,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
   const subtitleLines = formatSubtitleLines(
     normalizedText,
     normalizedText.length > config.maxCharsPerLine ? config.maxLines : Math.min(2, config.maxLines),
-    Math.max(10, config.maxCharsPerLine - 1.2)
+    Math.max(10, config.maxCharsPerLine - 1)
   );
   const longestLineLength = Math.max(...subtitleLines.map((line) => line.length), normalizedText.length);
   const fontSize = longestLineLength > config.maxCharsPerLine

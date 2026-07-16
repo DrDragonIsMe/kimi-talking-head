@@ -69,10 +69,12 @@ export const ProductLaunchLayout: React.FC<ProductLaunchLayoutProps> = ({
     ? `linear-gradient(180deg, ${sceneStyle.bgColor} 0%, ${theme.colors.backgroundGradient[1]} 100%)`
     : `linear-gradient(180deg, ${theme.colors.backgroundGradient[0]} 0%, ${theme.colors.backgroundGradient[1]} 100%)`;
 
-  const activeFeatureIndex = Math.min(
-    Math.max(0, Math.floor(activeCueIndex / 3)),
-    features.length - 1
-  );
+  const activeFeatureIndex = features.length > 0
+    ? Math.min(
+        Math.max(0, Math.floor(activeCueIndex / 3)),
+        features.length - 1
+      )
+    : 0;
 
   return (
     <AbsoluteFill style={{ background: bgGradient, overflow: 'hidden' }}>

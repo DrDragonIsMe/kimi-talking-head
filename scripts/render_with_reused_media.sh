@@ -41,7 +41,7 @@ source "$PROJECT_DIR/scripts/lib/state.sh"
 
 has_valid_srt() {
     local file="$1"
-    [ -s "$file" ] && rg -n '^[0-9]+$' "$file" 2>/dev/null | wc -l | awk '{exit !($1 >= 3)}'
+    [ -s "$file" ] && grep -Ec '^[0-9]+$' "$file" 2>/dev/null | awk '{exit !($1 >= 3)}'
 }
 
 mkdir -p "$WORK_DIR" "$OUTPUT_DIR" "$PROJECT_DIR/public/scene_visuals/$OUTPUT_NAME"

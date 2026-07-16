@@ -82,7 +82,7 @@ function runPipeline(job) {
 
     updateJob(job.jobId, { status: 'running', error: null, exitCode: null });
 
-    activeChild = spawn(
+    const child = spawn(
       'bash',
       [
         path.join(PROJECT_ROOT, 'scripts', 'pipeline.sh'),
@@ -96,11 +96,24 @@ function runPipeline(job) {
           ...process.env,
           PIPELINE_RUN_ID: job.jobId,
         },
+        detached: true,
       }
     );
+    activeChild = child;
 
     child.stdout.pipe(stdoutStream);
     child.stderr.pipe(stderrStream);
+
+    child.on('error', (err) => {
+      activeChild = null;
+      stdoutStream.end();
+      stderrStream.end();
+      updateJob(job.jobId, {
+        status: 'failed',
+        error: `Failed to start pipeline: ${err.message}`,
+      });
+      resolve();
+    });
 
     child.on('close', (code) => {
       activeChild = null;
@@ -279,7 +292,14 @@ const server = app.listen(PORT, () => {
 function shutdown(signal) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   if (activeChild) {
-    activeChild.kill('SIGTERM');
+    try {
+      // Kill the entire process group (negative PID) to ensure
+      // subprocesses like ffmpeg/python are also terminated.
+      process.kill(-activeChild.pid, 'SIGTERM');
+    } catch (_err) {
+      // Process group may already be gone; fall back to individual kill.
+      try { activeChild.kill('SIGTERM'); } catch (_e) {}
+    }
   }
   server.close(() => {
     process.exit(0);

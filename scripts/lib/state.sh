@@ -42,7 +42,16 @@ set_phase() {
   tmp=$(mktemp)
   jq --arg p "$phase" --arg s "$status" --arg n "$now" \
      --arg o "$output" --arg e "$error" \
-     '.[$p].status = $s | .[$p][if $s == "running" then "started_at" else "completed_at" end] = $n | .[$p].output = (if $o == "" then .[$p].output else $o end) | .[$p].error = (if $e == "" then null else $e end) | .[$p].attempt += (if $s == "running" then 1 else 0 end)' \
+     '.[$p].status = $s |
+      if $s == "running" then
+        .[$p].started_at = $n
+      else
+        .[$p].completed_at = $n |
+        if .[$p].started_at == null then .[$p].started_at = $n else . end
+      end |
+      .[$p].output = (if $o == "" then .[$p].output else $o end) |
+      .[$p].error = (if $e == "" then null else $e end) |
+      .[$p].attempt += (if $s == "running" then 1 else 0 end)' \
      "$file" > "$tmp" && mv "$tmp" "$file"
 }
 

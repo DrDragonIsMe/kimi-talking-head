@@ -95,7 +95,7 @@ has_valid_srt() {
         return 1
     fi
     local cue_count
-    cue_count=$(rg -n '^[0-9]+$' "$file" 2>/dev/null | wc -l | tr -d ' ')
+    cue_count=$(grep -Ec '^[0-9]+$' "$file" 2>/dev/null || echo 0)
     [ "${cue_count:-0}" -ge 3 ]
 }
 
