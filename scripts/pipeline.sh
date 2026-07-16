@@ -259,16 +259,29 @@ CURRENT_PHASE="parallel_media"
 monitor_phase "parallel_media" "running" "并行生成字幕、场景画面与唇形视频" "$(jq -cn --arg subtitleFile "$WORK_DIR/subtitles.srt" --arg visuals "$WORK_DIR/scene_visuals.json" --arg lipSync "$WORK_DIR/lip_synced.mp4" '{subtitleFile: $subtitleFile, visualsFile: $visuals, lipSyncFile: $lipSync}')"
 log_step "📝 STEP 3: 并行生成字幕、场景画面与唇形视频"
 
-# 提前提取标题，场景画面与 render 阶段都需要
-CONFIG_TITLE=$(jq -r '.title_card.title // ""' "$PROFILE")
-CONFIG_SUBTITLE=$(jq -r '.title_card.subtitle // ""' "$PROFILE")
-if [ -n "$CONFIG_TITLE" ]; then
-    VIDEO_TITLE="$CONFIG_TITLE"
-    VIDEO_SUBTITLE="$CONFIG_SUBTITLE"
+# 提前提取标题，场景画面与 render 阶段都需要。
+# 默认从文章自动提取；只有显式设置 FORCE_PROFILE_TITLE=1 时才优先使用
+# config/host_profile.json 中的硬编码标题。
+if [ "${FORCE_PROFILE_TITLE:-0}" = "1" ]; then
+    CONFIG_TITLE=$(jq -r '.title_card.title // ""' "$PROFILE")
+    CONFIG_SUBTITLE=$(jq -r '.title_card.subtitle // ""' "$PROFILE")
+    if [ -n "$CONFIG_TITLE" ]; then
+        VIDEO_TITLE="$CONFIG_TITLE"
+        VIDEO_SUBTITLE="$CONFIG_SUBTITLE"
+    else
+        EXTRACTED=$(node "$PROJECT_DIR/scripts/extract_title.js" "$ARTICLE_FILE" "本期分享")
+        VIDEO_TITLE=$(echo "$EXTRACTED" | jq -r '.title')
+        VIDEO_SUBTITLE=$(echo "$EXTRACTED" | jq -r '.subtitle')
+    fi
 else
     EXTRACTED=$(node "$PROJECT_DIR/scripts/extract_title.js" "$ARTICLE_FILE" "本期分享")
     VIDEO_TITLE=$(echo "$EXTRACTED" | jq -r '.title')
     VIDEO_SUBTITLE=$(echo "$EXTRACTED" | jq -r '.subtitle')
+    # If extraction fails entirely, fall back to profile title if present
+    if [ -z "$VIDEO_TITLE" ]; then
+        VIDEO_TITLE=$(jq -r '.title_card.title // ""' "$PROFILE")
+        VIDEO_SUBTITLE=$(jq -r '.title_card.subtitle // ""' "$PROFILE")
+    fi
 fi
 
 VISUALS_JSON="$WORK_DIR/scene_visuals.json"

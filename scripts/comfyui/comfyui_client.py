@@ -210,11 +210,18 @@ def get_audio_duration(audio_path):
 
 
 def _format_hms(seconds):
-    """Format seconds as M:SS for AudioCrop widgets."""
-    seconds = max(0, int(seconds))
-    m = seconds // 60
-    s = seconds % 60
-    return f"{m}:{s:02d}"
+    """Format seconds as M:SS.mmm for AudioCrop widgets.
+
+    Truncating to whole seconds caused the final (or any fractional) segment
+    to be cropped short, making the lip-sync video shorter than the audio and
+    forcing a uniform stretch in postprocess.
+    """
+    seconds = max(0.0, float(seconds))
+    total_ms = int(round(seconds * 1000))
+    m = total_ms // 60000
+    s = (total_ms % 60000) // 1000
+    ms = total_ms % 1000
+    return f"{m}:{s:02d}.{ms:03d}"
 
 
 def patch_prompt(prompt, image_filename, audio_filename, profile, audio_path=None,
