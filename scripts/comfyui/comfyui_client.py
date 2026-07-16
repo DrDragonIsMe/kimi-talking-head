@@ -48,7 +48,14 @@ def request_with_retry(method, url, max_retries=3, timeout=60, **kwargs):
             return resp
         except requests.RequestException as e:
             last_err = e
-            print(f"Request {method.upper()} {url} failed (attempt {attempt}/{max_retries}): {e}")
+            detail = ""
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    body = e.response.text[:500]
+                    detail = f" [status={e.response.status_code} body={body}]"
+                except Exception:
+                    pass
+            print(f"Request {method.upper()} {url} failed (attempt {attempt}/{max_retries}): {e}{detail}")
             if attempt < max_retries:
                 time.sleep(min(30, 2 ** attempt))
     raise last_err
