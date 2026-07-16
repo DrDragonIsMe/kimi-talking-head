@@ -27,6 +27,7 @@ WORKFLOW="${WORKFLOW:-scripts/comfyui/workflow_prompt.json}"
 REMOTE_BASE="${COMFYUI_REMOTE_DIR:-/root/aigc_apps/guthrie_run}"
 KEEP_REMOTE="${KEEP_REMOTE:-0}"
 RESUME=0
+FORCE=0
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --output) OUTPUT="$2"; shift 2;;
     --work-dir) WORK_DIR="$2"; shift 2;;
     --resume) RESUME=1; shift;;
+    --force) FORCE=1; shift;;
     *) echo "Unknown arg: $1" >&2; exit 1;;
   esac
 done
@@ -80,8 +82,15 @@ run_remote() {
   ssh "${SSH_OPTS[@]}" -p "$PORT" "$USER@$HOST" "$@"
 }
 
-# If resume and local output already valid, skip entirely
-if [[ "$RESUME" == "1" && -s "$LOCAL_OUTPUT" ]]; then
+# If resume and local output already valid, skip entirely — unless force regeneration.
+if [[ "$FORCE" == "1" ]]; then
+  echo "🧹 --force 指定，清除已有本地输出与分段缓存"
+  rm -f "$LOCAL_OUTPUT"
+  rm -f "${LOCAL_OUTPUT%.mp4}"_seg*.mp4
+  # Also clear any stale remote segments/output so the server does not reuse them.
+  echo "🧹 --force 指定，清除服务器端旧输出与分段缓存"
+  run_remote "rm -f $REMOTE_DIR/$OUTPUT ${REMOTE_DIR}/${WORK_DIR}/lip_synced_raw_seg*.mp4" || true
+elif [[ "$RESUME" == "1" && -s "$LOCAL_OUTPUT" ]]; then
   DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$LOCAL_OUTPUT" 2>/dev/null || true)
   if [[ -n "$DUR" && "${DUR%.*}" -gt 0 ]]; then
     echo "♻️  本地已有有效输出，跳过服务器端生成: $LOCAL_OUTPUT"
@@ -111,11 +120,27 @@ rsync -avz -e "$RSYNC_SSH" \
 
 echo "🎬 在服务器上启动生成（无 SSH 隧道）..."
 REMOTE_RUNNER="$REMOTE_DIR/runner.sh"
+REMOTE_LOCK="$REMOTE_DIR/.generate_segments.lock"
 # Write a runner script on the remote side to avoid local quoting/escaping issues.
+# The runner uses a PID lock so only ONE generate_segments.py process can run
+# per RUN_ID. If a previous process is still alive, we attach to it instead of
+# starting a duplicate, which would waste GPU memory and queue slots.
 run_remote "cat > $REMOTE_RUNNER << 'REMOTE_EOF'
 #!/bin/bash
 set +u
 cd $REMOTE_DIR
+LOCK_FILE=\"$REMOTE_LOCK\"
+if [[ -f \"\$LOCK_FILE\" ]]; then
+  OLD_PID=\$(cat \"\$LOCK_FILE\" 2>/dev/null || true)
+  if [[ -n \"\$OLD_PID\" ]] && ps -p \"\$OLD_PID\" >/dev/null 2>&1; then
+    echo \"Found existing generator process PID=\$OLD_PID for run $RUN_ID, attaching instead of starting new one.\"
+    echo \$OLD_PID
+    exit 0
+  else
+    echo \"Stale lock file found (PID=\$OLD_PID not running), starting new process.\"
+    rm -f \"\$LOCK_FILE\"
+  fi
+fi
 source /root/aigc_apps/InfiniteTalk/venv/bin/activate
 IMAGE_BASENAME=\$(basename $IMAGE)
 AUDIO_BASENAME=\$(basename $AUDIO)
@@ -130,7 +155,9 @@ nohup env PYTHONUNBUFFERED=1 python scripts/comfyui/generate_segments.py \
   --work-dir $WORK_DIR \
   --resume \
   > $REMOTE_LOG 2>&1 &
-echo \$!
+PID=\$!
+echo \$PID > \"\$LOCK_FILE\"
+echo \$PID
 REMOTE_EOF
 chmod +x $REMOTE_RUNNER
 bash $REMOTE_RUNNER"
@@ -205,6 +232,9 @@ if [[ -z "$DUR" || "${DUR%.*}" -le 0 ]]; then
   exit 1
 fi
 echo "✅ 本地输出时长: ${DUR}s"
+
+# Remove the singleton lock now that generation finished successfully.
+run_remote "rm -f $REMOTE_LOCK" >/dev/null 2>&1 || true
 
 if [[ "$KEEP_REMOTE" != "1" ]]; then
   echo "🧹 清理服务器端临时目录..."

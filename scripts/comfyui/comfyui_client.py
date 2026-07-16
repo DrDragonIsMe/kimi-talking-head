@@ -12,6 +12,7 @@ This script automates the full ComfyUI workflow:
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -210,18 +211,17 @@ def get_audio_duration(audio_path):
 
 
 def _format_hms(seconds):
-    """Format seconds as M:SS.mmm for AudioCrop widgets.
+    """Format seconds as M:SS for AudioCrop widgets.
 
-    Truncating to whole seconds caused the final (or any fractional) segment
-    to be cropped short, making the lip-sync video shorter than the audio and
-    forcing a uniform stretch in postprocess.
+    The AudioCrop node parses the string by splitting on ':' and calling
+    int() on the seconds/minutes fields, so it only supports whole-second
+    precision.  Callers that need to avoid cropping fractional audio must
+    round the end time up (e.g. math.ceil) before formatting.
     """
-    seconds = max(0.0, float(seconds))
-    total_ms = int(round(seconds * 1000))
-    m = total_ms // 60000
-    s = (total_ms % 60000) // 1000
-    ms = total_ms % 1000
-    return f"{m}:{s:02d}.{ms:03d}"
+    seconds = max(0, int(seconds))
+    m = seconds // 60
+    s = seconds % 60
+    return f"{m}:{s:02d}"
 
 
 def patch_prompt(prompt, image_filename, audio_filename, profile, audio_path=None,
@@ -398,7 +398,12 @@ def patch_prompt(prompt, image_filename, audio_filename, profile, audio_path=Non
 
         elif cls == "AudioCrop":
             inputs["start_time"] = _format_hms(segment_start)
-            inputs["end_time"] = _format_hms(segment_end)
+            # Round end time UP to the next whole second.  The AudioCrop node
+            # only supports M:SS (whole seconds), and truncating the final
+            # fractional segment's end_time caused the lip-sync video to be
+            # shorter than the audio.  Using ceil lets AudioCrop clamp to the
+            # actual audio duration internally instead of cropping early.
+            inputs["end_time"] = _format_hms(math.ceil(segment_end))
 
         elif cls == "VHS_VideoCombine":
             inputs["images"] = ["130", 0]

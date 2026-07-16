@@ -414,18 +414,29 @@ SUBTITLES_VISUALS_PID=$!
                 if [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "true" ] || [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "1" ]; then
                     echo "🎬 使用服务器端 ComfyUI API 进行 InfiniteTalk 唇形同步（无本地 SSH 隧道）..."
                     if [ "${FORCE_LIPSYNC:-0}" = "1" ]; then
-                        echo "🧹 FORCE_LIPSYNC=1，清除已有分段缓存"
+                        echo "🧹 FORCE_LIPSYNC=1，强制重新生成，清除已有分段缓存与旧输出"
                         rm -f "$WORK_DIR"/lip_synced_raw_seg*.mp4
+                        rm -f "$WORK_DIR"/lip_synced_raw.mp4
+                        bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
+                            --config "$CONFIG" \
+                            --profile "$PROFILE" \
+                            --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
+                            --image "$HOST_RESIZED" \
+                            --audio "$WORK_DIR/audio.wav" \
+                            --output "$WORK_DIR/lip_synced_raw.mp4" \
+                            --work-dir "$WORK_DIR" \
+                            --force
+                    else
+                        bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
+                            --config "$CONFIG" \
+                            --profile "$PROFILE" \
+                            --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
+                            --image "$HOST_RESIZED" \
+                            --audio "$WORK_DIR/audio.wav" \
+                            --output "$WORK_DIR/lip_synced_raw.mp4" \
+                            --work-dir "$WORK_DIR" \
+                            --resume
                     fi
-                    bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
-                        --config "$CONFIG" \
-                        --profile "$PROFILE" \
-                        --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
-                        --image "$HOST_RESIZED" \
-                        --audio "$WORK_DIR/audio.wav" \
-                        --output "$WORK_DIR/lip_synced_raw.mp4" \
-                        --work-dir "$WORK_DIR" \
-                        --resume
                 else
                 echo "🎬 使用本地 ComfyUI API 进行 InfiniteTalk 唇形同步（SSH 隧道）..."
                 GEN_ARGS=(
