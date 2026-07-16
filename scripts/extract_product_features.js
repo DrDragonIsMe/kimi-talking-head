@@ -168,7 +168,7 @@ async function main() {
     try {
       result = await generateWithAi(text, profile);
       source = 'kimi-code';
-      console.log('🤖 使用 Kimi Code API 提取产品卖点');
+      console.error('🤖 使用 Kimi Code API 提取产品卖点');
     } catch (err) {
       console.warn(`⚠️ Kimi Code API 失败，回退到本地规则: ${err.message}`);
       result = fallbackExtract(text, profile);

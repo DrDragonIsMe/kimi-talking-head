@@ -14,11 +14,22 @@
     "emotion": "neutral",
     "format": "wav"
   },
-  "musetalk": {
+  "infinitetalk": {
     "enable": true,
-    "lip_quality": "high",
-    "face_enhance": true,
-    "bbox_shift": 0
+    "size": "infinitetalk-480",
+    "sample_steps": 40,
+    "motion_frame": 9,
+    "mode": "streaming",
+    "text_guide_scale": 5.0,
+    "audio_guide_scale": 4.0,
+    "num_persistent_param_in_dit": 0,
+    "low_vram": true,
+    "blocks_to_swap": 36,
+    "segment_duration": 40,
+    "segment_overlap": 0,
+    "crossfade_duration": 0,
+    "max_retries": 1,
+    "keep_segments": false
   },
   "product": {
     "brand": "薪灵AI",
@@ -108,6 +119,22 @@
       "cache": true,
       "timeout_ms": 120000,
       "prompt_template": ""
+    },
+    "storyboard": {
+      "enabled": true,
+      "max_shot_duration": 12,
+      "min_shot_duration": 3,
+      "shot_types": ["wide shot", "medium shot", "close-up", "extreme close-up", "over-the-shoulder", "insert"],
+      "camera_movements": ["static", "slow push-in", "slow pull-out", "gentle pan", "tracking", "handheld"],
+      "transitions": ["cut", "fade", "dissolve"],
+      "styles": ["editorial portrait", "business documentary", "cinematic", "data visualization", "abstract"],
+      "llm": {
+        "enabled": true,
+        "provider": "kimi",
+        "max_tokens": 12000,
+        "max_retries": 2,
+        "cache": true
+      }
     }
   },
   "template": "editorial",

@@ -17,6 +17,20 @@ temp/
 dist/
 build/
 
+# Generated runtime media (render inputs / outputs)
+public/audio.wav
+public/host_video.mp4
+public/subtitles.json
+public/subtitles.srt
+public/props.json
+public/scene_visuals/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -28,3 +42,6 @@ Thumbs.db
 # Logs
 *.log
 .playwright-mcp/
+
+# Test artifacts
+coverage/

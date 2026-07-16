@@ -17,7 +17,7 @@ services:
       - ./config:/app/config:ro
       # 素材目录
       - ./assets:/app/assets:ro
-      # SSH 免密登录远端 TTS / MuseTalk 服务器
+      # SSH 免密登录远端 TTS / InfiniteTalk 服务器
       - ~/.ssh:/root/.ssh:ro
       # 任务持久化（可选）
       - ./api/jobs:/app/api/jobs

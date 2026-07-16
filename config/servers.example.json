@@ -7,9 +7,9 @@
     "tts_path": "",
     "tts_workspace": "",
     "tts_python_env": "",
-    "musetalk_path": "",
-    "musetalk_workspace": "",
-    "musetalk_python_env": ""
+    "infinitetalk_path": "",
+    "infinitetalk_workspace": "",
+    "infinitetalk_python_env": ""
   },
   "backup": {
     "host": "your-backup-server-ip",
@@ -19,9 +19,9 @@
     "tts_path": "",
     "tts_workspace": "",
     "tts_python_env": "",
-    "musetalk_path": "",
-    "musetalk_workspace": "",
-    "musetalk_python_env": ""
+    "infinitetalk_path": "",
+    "infinitetalk_workspace": "",
+    "infinitetalk_python_env": ""
   },
   "local": {
     "project_dir": "~/kimi-talking-head",

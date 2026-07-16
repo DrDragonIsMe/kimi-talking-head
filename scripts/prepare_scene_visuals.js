@@ -16,9 +16,10 @@ const outputDir = process.argv[4];
 const videoTitle = process.argv[5] || '';
 const projectDir = path.resolve(__dirname, '..');
 const configPath = process.argv[6] || path.join(projectDir, 'config', 'host_profile.json');
+const storyboardPath = process.argv[7] || '';
 
 if (!srtPath || !outputJsonPath || !outputDir) {
-  console.error('Usage: node prepare_scene_visuals.js <subtitles.srt> <output.json> <output-dir> [video-title] [config-path]');
+  console.error('Usage: node prepare_scene_visuals.js <subtitles.srt> <output.json> <output-dir> [video-title] [config-path] [storyboard-path]');
   process.exit(1);
 }
 
@@ -188,8 +189,10 @@ async function asyncPool(tasks, concurrency) {
   return results;
 }
 
-async function extractKeywordsWithLLM(text, title) {
-  const cacheKey = text.slice(0, 200);
+async function extractKeywordsWithLLM(text, title, shots = []) {
+  const shotSignature = shots.length ? `|${shots.map((s) => s.visual_prompt).join('|')}` : '';
+  const cacheInput = `${text.slice(0, 500)}${shotSignature}`.slice(0, 1200);
+  const cacheKey = cacheInput.slice(0, 300);
   if (LLM_KEYWORD_CACHE.has(cacheKey)) {
     return LLM_KEYWORD_CACHE.get(cacheKey);
   }
@@ -200,7 +203,7 @@ async function extractKeywordsWithLLM(text, title) {
   }
 
   // 1) Disk cache hit
-  const cached = readCachedKeywords(text);
+  const cached = readCachedKeywords(cacheInput);
   if (cached) {
     LLM_KEYWORD_CACHE.set(cacheKey, cached);
     return cached;
@@ -214,6 +217,7 @@ Rules:
 2. Prefer concrete, visualizable concepts: scenes, actions, objects, moods, settings. Avoid abstract nouns.
 3. If the scene mentions data/charts, risk, AI, recruitment, or talent, include a matching visual keyword.
 4. Keep the Chinese summary under 20 characters.
+5. If storyboard shots are provided, synthesize their visual directions into one cohesive scene image prompt.
 
 Output strictly as JSON:
 {
@@ -223,7 +227,8 @@ Output strictly as JSON:
 }
 
 Video title: ${title || 'business insight'}
-Scene text: """${text.slice(0, 500)}"""`;
+Scene text: """${text.slice(0, 500)}"""
+${shots.length ? `Storyboard shots for this scene:\n${shots.map((s) => `- ${s.shot_type}: ${s.visual_prompt}`).join('\n')}\nSynthesize these directions into a single cohesive visual.` : ''}`;
 
   const prompt = cfg.prompt_template || defaultPrompt;
   const startMs = Date.now();
@@ -260,7 +265,7 @@ Scene text: """${text.slice(0, 500)}"""`;
       };
 
       LLM_KEYWORD_CACHE.set(cacheKey, result);
-      writeCachedKeywords(text, result);
+      writeCachedKeywords(cacheInput, result);
 
       const elapsed = Date.now() - startMs;
       console.log(`  🤖 LLM 关键词提取成功 (${elapsed}ms): ${searchQuery.slice(0, 60)}`);
@@ -307,6 +312,64 @@ function loadConfig() {
     runtimeConfig = {};
     return runtimeConfig;
   }
+}
+
+function loadStoryboard() {
+  if (!storyboardPath) return null;
+  try {
+    const raw = fs.readFileSync(storyboardPath, 'utf8');
+    const shots = JSON.parse(raw);
+    if (!Array.isArray(shots)) return null;
+    return shots;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function getShotsForScene(shots, start, end) {
+  if (!shots || shots.length === 0) return [];
+  return shots.filter((s) => s.start >= start && s.start < end);
+}
+
+function buildQueryFromShots(sceneShots) {
+  if (!sceneShots || sceneShots.length === 0) return '';
+  // Combine keywords from all shot visual prompts, weighted by shot duration,
+  // to produce a short stock-photo query that reflects the whole scene.
+  const stopWords = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'at', 'with', 'and', 'or', 'for', 'to', 'from', 'by', 'is', 'are', 'no', 'text', 'watermark', 'logo', 'background', 'style', 'light', 'soft', 'bright', 'clean', 'modern', 'professional', 'realistic', 'cinematic']);
+  const freq = new Map();
+  for (const shot of sceneShots) {
+    const prompt = (shot.visual_prompt || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+    const weight = Math.max(1, Math.round((shot.duration || 1) * 10));
+    for (const w of prompt.split(/\s+/)) {
+      if (w.length > 2 && !stopWords.has(w)) {
+        freq.set(w, (freq.get(w) || 0) + weight);
+      }
+    }
+  }
+  const sorted = Array.from(freq.entries()).sort((a, b) => b[1] - a[1]).map(([w]) => w);
+  return sorted.slice(0, 6).join(' ');
+}
+
+function buildPromptFromShots(sceneShots, basePrompt) {
+  if (!sceneShots || sceneShots.length === 0) return basePrompt;
+  const shotPrompts = sceneShots
+    .map((s) => s.visual_prompt)
+    .filter(Boolean);
+  if (shotPrompts.length === 0) return basePrompt;
+
+  // Deduplicate loosely while preserving order.
+  const seen = new Set();
+  const unique = [];
+  for (const p of shotPrompts) {
+    const key = p.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 80);
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(p);
+    }
+  }
+
+  const shotDescriptions = unique.join(' | ');
+  return `${basePrompt} Shot-by-shot direction: ${shotDescriptions}`;
 }
 
 function ensureDir(filePath) {
@@ -426,7 +489,7 @@ function httpGetJson(url, headers = {}) {
 
 // -------------- 图片提供商 --------------
 
-async function fetchWithUnsplashApi(query, filePath, config) {
+async function fetchWithUnsplashApi(query, _prompt, filePath, config) {
   const accessKey = config.access_key || process.env.UNSPLASH_ACCESS_KEY || '';
   if (!accessKey) {
     throw new Error('Unsplash access key not configured');
@@ -457,7 +520,7 @@ async function fetchWithUnsplashApi(query, filePath, config) {
   };
 }
 
-async function fetchWithPicsum(query, filePath, _config) {
+async function fetchWithPicsum(query, _prompt, filePath, _config) {
   // Lorem Picsum 提供 CC0 风格的随机占位图，无需 API Key；用 query seed 保证同一场景稳定
   const seed = Buffer.from(query || 'scene').toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
   const url = `https://picsum.photos/seed/${seed}/${TARGET_WIDTH}/${TARGET_HEIGHT}`;
@@ -471,16 +534,16 @@ async function fetchWithPicsum(query, filePath, _config) {
   };
 }
 
-async function fetchWithUnsplash(query, filePath, config) {
+async function fetchWithUnsplash(query, prompt, filePath, config) {
   try {
-    return await fetchWithUnsplashApi(query, filePath, config);
+    return await fetchWithUnsplashApi(query, prompt, filePath, config);
   } catch (err) {
     console.warn(`  Unsplash API 不可用 (${err.message})，降级到 Picsum`);
-    return await fetchWithPicsum(query, filePath, config);
+    return await fetchWithPicsum(query, prompt, filePath, config);
   }
 }
 
-async function fetchWithPexels(query, filePath, config) {
+async function fetchWithPexels(query, _prompt, filePath, config) {
   const apiKey = config.api_key || process.env.PEXELS_API_KEY || '';
   if (!apiKey) {
     throw new Error('Pexels API key not configured');
@@ -520,13 +583,13 @@ function findArkcliGenOutput(cwd) {
   return sorted.length ? path.join(cwd, sorted[0].name) : null;
 }
 
-async function fetchWithWanx(query, filePath, config) {
+async function fetchWithWanx(query, prompt, filePath, config) {
   if (!commandExists('arkcli')) {
     throw new Error('arkcli not installed, cannot use wanx provider');
   }
   const model = config.model || process.env.WANX_MODEL || '';
   const size = config.size || '1024x1024';
-  const prompt = query || 'business editorial visual';
+  const finalPrompt = prompt || query || 'business editorial visual';
   const tmpDir = path.join(path.dirname(filePath), `.wanx-${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
   try {
@@ -534,7 +597,7 @@ async function fetchWithWanx(query, filePath, config) {
     if (model) args.push('--model', model);
     // 尺寸参数在 arkcli 中不一定叫 --size；先尝试 --size，失败也不影响服务端默认
     if (size) args.push('--size', size);
-    args.push(prompt);
+    args.push(finalPrompt);
 
     const result = spawnSync('arkcli', args, {
       cwd: tmpDir,
@@ -605,7 +668,7 @@ function generatePlaceholderImage(filePath) {
   }
 }
 
-async function fetchWithPlaceholder(_query, filePath, _config) {
+async function fetchWithPlaceholder(_query, _prompt, filePath, _config) {
   generatePlaceholderImage(filePath);
   if (!isValidImage(filePath)) {
     throw new Error('Failed to generate placeholder image');
@@ -633,7 +696,7 @@ async function fetchSceneVisual(query, prompt, filePath, config) {
   for (const providerName of providers) {
     try {
       console.log(`  尝试 ${providerName}: "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}"`);
-      const meta = await PROVIDERS[providerName](query, filePath, config[providerName] || {});
+      const meta = await PROVIDERS[providerName](query, prompt, filePath, config[providerName] || {});
       if (isValidImage(filePath)) {
         console.log(`  ✅ ${providerName} 成功 -> ${filePath}`);
         return meta;
@@ -667,23 +730,35 @@ const main = async () => {
   const sceneCount = Math.max(1, Math.ceil(totalDuration / SCENE_DURATION));
   const segmentDuration = totalDuration / sceneCount;
 
+  const shots = loadStoryboard();
+  if (shots) {
+    console.log(`🎬 已加载分镜脚本: ${shots.length} 个镜头`);
+  }
+
   const buildSceneText = (i) => {
     const start = i * segmentDuration;
     const end = i === sceneCount - 1 ? totalDuration : (i + 1) * segmentDuration;
     const segmentCues = cues.filter((c) => c.start >= start && c.start < end);
     const text = segmentCues.map((c) => c.text).join(' ');
-    return { start, end, text };
+    const sceneShots = getShotsForScene(shots, start, end);
+    return { start, end, text, shots: sceneShots };
   };
 
   const buildSceneInfo = (i, llmResult) => {
-    const { start, end, text } = buildSceneText(i);
+    const { start, end, text, shots: sceneShots } = buildSceneText(i);
 
     // 1) Try LLM-driven, content-aware keywords first.
     // 2) Fallback to heuristic extraction.
     const fallbackQuery = extractKeywords(text) || extractKeywords(videoTitle) || 'business editorial visual';
 
-    const query = llmResult?.query || fallbackQuery;
-    const aiPrompt = llmResult?.prompt || fallbackQuery;
+    // If storyboard shots are available, derive query/prompt from them.
+    const shotQuery = buildQueryFromShots(sceneShots);
+    const shotAiPrompt = sceneShots && sceneShots.length > 0
+      ? sceneShots.map((s) => s.visual_prompt).filter(Boolean).join(' | ')
+      : '';
+    // Prefer LLM result (which can synthesize shots + text), then storyboard, then fallback.
+    const query = llmResult?.query || shotQuery || fallbackQuery;
+    const aiPrompt = llmResult?.prompt || shotAiPrompt || fallbackQuery;
     const summary = llmResult?.summary || '';
 
     const slug = toSlug(query, i);
@@ -692,9 +767,10 @@ const main = async () => {
     const relativePath = path.relative(path.join(process.cwd(), 'public'), filePath);
 
     // Build a prompt that explicitly ties the image to the scene meaning.
-    const prompt = `Vertical editorial visual for a Chinese business news explainer. Topic: ${videoTitle || 'business insight'}. Scene focus: ${query}. Narrative hint: ${text.slice(0, 300)}. ${aiPrompt ? `Visual direction: ${aiPrompt} ` : ''}Editorial business magazine, realistic, cinematic soft light, data-driven workplace scenes. Clean composition, premium newsroom art direction, no text, no letters, no watermark, no logo, no UI screenshot.`;
+    let prompt = `Vertical editorial visual for a Chinese business news explainer. Topic: ${videoTitle || 'business insight'}. Scene focus: ${query}. Narrative hint: ${text.slice(0, 300)}. Editorial business magazine, realistic, cinematic soft light, data-driven workplace scenes. Clean composition, premium newsroom art direction, no text, no letters, no watermark, no logo, no UI screenshot.`;
+    prompt = buildPromptFromShots(sceneShots, prompt);
 
-    return { start, end, text, query, aiPrompt, summary, slug, fileName, filePath, relativePath, prompt };
+    return { start, end, text, query, aiPrompt, summary, slug, fileName, filePath, relativePath, prompt, shots: sceneShots };
   };
 
   // Pre-extract LLM keywords with controlled concurrency so we don't hammer the API.
@@ -708,8 +784,8 @@ const main = async () => {
     const tasks = [];
     for (let i = 0; i < sceneCount; i++) {
       tasks.push((async () => {
-        const { text } = buildSceneText(i);
-        const result = await extractKeywordsWithLLM(text, videoTitle);
+        const { text, shots: sceneShots } = buildSceneText(i);
+        const result = await extractKeywordsWithLLM(text, videoTitle, sceneShots);
         return { index: i, result };
       }));
     }
@@ -747,7 +823,7 @@ const main = async () => {
     } else {
       meta = await fetchSceneVisual(info.query, info.prompt, info.filePath, config);
     }
-    return {
+    const sceneVisual = {
       start: info.start,
       end: info.end,
       prompt: info.prompt,
@@ -762,6 +838,24 @@ const main = async () => {
       author: meta.author,
       attributionRequired: meta.attributionRequired,
     };
+    if (info.shots && info.shots.length > 0) {
+      sceneVisual.shots = info.shots.map((s) => ({
+        id: s.id,
+        start: s.start,
+        end: s.end,
+        duration: s.duration,
+        shot_type: s.shot_type,
+        subject: s.subject,
+        setting: s.setting,
+        camera: s.camera,
+        lighting: s.lighting,
+        description: s.description,
+        visual_prompt: s.visual_prompt,
+        style: s.style,
+        transition_from_prev: s.transition_from_prev,
+      }));
+    }
+    return sceneVisual;
   };
 
   // Phase 1: content-aware keyword extraction (LLM + cache).

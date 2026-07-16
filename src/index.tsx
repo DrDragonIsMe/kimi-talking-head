@@ -57,6 +57,7 @@ export interface VideoLayoutConfig {
     showQuoteHighlight?: boolean;
   };
   hybrid?: {
+    preset?: 'default' | 'host-focus' | 'visual-focus' | 'minimal' | 'balanced';
     mainVisualRatio?: number;
     mainVisualBorderRadius?: number;
     hostPosition?: string;
@@ -65,6 +66,8 @@ export interface VideoLayoutConfig {
     hostBorderRadius?: number;
     showSubtitles?: boolean;
     showTalkingPoints?: boolean;
+    showProgressBreadcrumb?: boolean;
+    showChapterCards?: boolean;
     showDataBars?: boolean;
     showQuoteHighlight?: boolean;
     topicTag?: {

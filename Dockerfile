@@ -1,5 +1,5 @@
 # 薪灵AI 口播视频生成器 — API 服务镜像
-# 注意：TTS / MuseTalk 依赖远端 GPU 服务器，需通过 SSH 免密登录调用。
+# 注意：TTS / InfiniteTalk 依赖远端 GPU 服务器，需通过 SSH 免密登录调用。
 
 FROM node:20-bookworm
 

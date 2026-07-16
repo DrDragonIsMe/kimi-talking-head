@@ -4,6 +4,7 @@ set -e
 LOCAL_FILE=$1
 REMOTE_REL_PATH=$2
 CONFIG="config/servers.json"
+SSH_OPTS="-o ServerAliveInterval=60 -o ServerAliveCountMax=7"
 
 if SERVER_INFO=$(bash scripts/check_server.sh primary 2>/dev/null); then
     HOST=$(echo "$SERVER_INFO" | cut -d: -f2)
@@ -26,7 +27,7 @@ else
 fi
 
 REMOTE_DIR="$WORKSPACE/$(dirname $REMOTE_REL_PATH)"
-ssh -p $PORT $USER@$HOST "mkdir -p $REMOTE_DIR"
-scp -P $PORT "$LOCAL_FILE" "$USER@$HOST:$WORKSPACE/$REMOTE_REL_PATH"
+ssh -p $PORT $SSH_OPTS $USER@$HOST "mkdir -p $REMOTE_DIR"
+scp -P $PORT -o ServerAliveInterval=60 -o ServerAliveCountMax=7 "$LOCAL_FILE" "$USER@$HOST:$WORKSPACE/$REMOTE_REL_PATH"
 
 echo "$HOST:$PORT:$USER:$WORKSPACE"

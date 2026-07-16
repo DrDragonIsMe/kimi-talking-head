@@ -11,6 +11,7 @@ PROFILE="${3:-$PROJECT_DIR/config/host_profile.json}"
 CONFIG="$PROJECT_DIR/config/servers.json"
 
 source "$PROJECT_DIR/scripts/monitor_utils.sh"
+source "$PROJECT_DIR/scripts/lib/state.sh"
 
 # Load local environment variables (API keys, etc.)
 if [ -f "$PROJECT_DIR/.env" ]; then
@@ -38,23 +39,35 @@ else
     export PIPELINE_MONITOR_NOTIFY="${PIPELINE_MONITOR_NOTIFY:-0}"
 fi
 
+# Storyboard drives scene visuals; if we force-regenerate the storyboard,
+# the downstream visuals are likely stale and should also be regenerated.
+if [ "${FORCE_STORYBOARD:-0}" = "1" ]; then
+    FORCE_VISUALS=1
+fi
+
 mkdir -p "$TEMP_ROOT" "$WORK_DIR" "$OUTPUT_DIR"
+
+init_state "$WORK_DIR"
+print_state "$WORK_DIR"
 
 monitor_init "$WORK_DIR/monitor" "$PIPELINE_RUN_ID" "$WORK_DIR"
 
 CURRENT_PHASE="bootstrap"
 
-pipeline_finish_monitor() {
+pipeline_finish() {
     local exit_code=$?
 
     if [ "$exit_code" -ne 0 ]; then
+        if [ -n "${CURRENT_PHASE:-}" ]; then
+            mark_failed "$WORK_DIR" "$CURRENT_PHASE" "exit code $exit_code"
+        fi
         monitor_phase "$CURRENT_PHASE" "failed" "流水线执行失败" "$(jq -cn --arg output "$OUTPUT_NAME" '{outputName: $output}')"
     else
         monitor_phase "pipeline" "completed" "整条流水线执行完成" "$(jq -cn --arg output "$OUTPUT_NAME" --arg workDir "$WORK_DIR" '{outputName: $output, workDir: $workDir}')"
     fi
 }
 
-trap pipeline_finish_monitor EXIT
+trap pipeline_finish EXIT
 
 log_step() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -115,6 +128,26 @@ process.exit(Array.isArray(data) && data.length > 0 ? 0 : 1);
 EOF
 }
 
+storyboard_enabled() {
+  jq -e '.scene_visuals.storyboard.enabled // true' "$PROFILE" >/dev/null 2>&1
+}
+
+has_valid_storyboard() {
+  local file="$1"
+  if ! storyboard_enabled; then
+    return 0
+  fi
+  if [ ! -s "$file" ]; then
+    return 1
+  fi
+  node - "$file" <<'EOF' >/dev/null 2>&1
+const fs = require('fs');
+const file = process.argv[2];
+const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+process.exit(Array.isArray(data) && data.length > 0 && data.every((s) => s.id && s.visual_prompt) ? 0 : 1);
+EOF
+}
+
 video_matches_audio() {
     local video_file="$1"
     local audio_duration="$2"
@@ -163,42 +196,64 @@ if [ "$PRIMARY_DETECTED" != "true" ] && [ "$BACKUP_DETECTED" != "true" ]; then
     echo ""
 fi
 
-CURRENT_PHASE="preprocess"
-monitor_phase "preprocess" "running" "开始文本预处理" "$(jq -cn --arg article "$ARTICLE_FILE" '{articleFile: $article}')"
-log_step "📝 STEP 1: 文本预处理"
+CURRENT_PHASE="script"
+if is_phase_completed "$WORK_DIR" script "$WORK_DIR/script.txt" && [ "${FORCE_SCRIPT:-0}" != "1" ]; then
+    echo "♻️  state: script 已完成，跳过"
+    SCRIPT_TEXT=$(cat "$WORK_DIR/script.txt")
+else
+    monitor_phase "preprocess" "running" "开始文本预处理" "$(jq -cn --arg article "$ARTICLE_FILE" '{articleFile: $article}')"
+    log_step "📝 STEP 1: 文本预处理"
+    mark_running "$WORK_DIR" script
 
-ARTICLE_FILE_ABS=$(cd "$(dirname "$ARTICLE_FILE")" && pwd)/$(basename "$ARTICLE_FILE")
-if [ "$ARTICLE_FILE_ABS" != "$WORK_DIR/article_raw.md" ]; then
-    cp "$ARTICLE_FILE" "$WORK_DIR/article_raw.md"
+    ARTICLE_FILE_ABS=$(cd "$(dirname "$ARTICLE_FILE")" && pwd)/$(basename "$ARTICLE_FILE")
+    if [ "$ARTICLE_FILE_ABS" != "$WORK_DIR/article_raw.md" ]; then
+        cp "$ARTICLE_FILE" "$WORK_DIR/article_raw.md"
+    fi
+
+    TEMPLATE=$(jq -r '.template // "editorial"' "$PROFILE")
+
+    node "$PROJECT_DIR/scripts/generate_script.js" \
+        "$WORK_DIR/article_raw.md" \
+        "$WORK_DIR/script.txt" \
+        "$TEMPLATE"
+
+    SCRIPT_TEXT=$(cat "$WORK_DIR/script.txt")
+    echo "口播稿长度: ${#SCRIPT_TEXT} 字符"
+    echo ""
+    mark_completed "$WORK_DIR" script "$WORK_DIR/script.txt"
+    monitor_phase "preprocess" "completed" "文本预处理完成" "$(jq -cn --arg scriptFile "$WORK_DIR/script.txt" --arg chars "${#SCRIPT_TEXT}" '{scriptFile: $scriptFile, scriptChars: ($chars | tonumber)}')"
 fi
 
-TEMPLATE=$(jq -r '.template // "editorial"' "$PROFILE")
-
-node "$PROJECT_DIR/scripts/generate_script.js" \
-    "$WORK_DIR/article_raw.md" \
-    "$WORK_DIR/script.txt" \
-    "$TEMPLATE"
-
-SCRIPT_TEXT=$(cat "$WORK_DIR/script.txt")
-echo "口播稿长度: ${#SCRIPT_TEXT} 字符"
-echo ""
-monitor_phase "preprocess" "completed" "文本预处理完成" "$(jq -cn --arg scriptFile "$WORK_DIR/script.txt" --arg chars "${#SCRIPT_TEXT}" '{scriptFile: $scriptFile, scriptChars: ($chars | tonumber)}')"
+# Ensure template is available even when script generation is skipped
+TEMPLATE=${TEMPLATE:-$(jq -r '.template // "editorial"' "$PROFILE")}
 
 CURRENT_PHASE="tts"
-monitor_phase "tts" "running" "开始生成 TTS 音频" "$(jq -cn --arg target "$WORK_DIR/audio.wav" '{audioFile: $target}')"
-log_step "🎙️  STEP 2: IndexTTS 声音克隆"
-
-if has_valid_audio "$WORK_DIR/audio.wav" && [ "${FORCE_TTS:-0}" != "1" ]; then
-    echo "♻️  复用已有音频: $WORK_DIR/audio.wav"
+if is_phase_completed "$WORK_DIR" tts "$WORK_DIR/audio.wav" && [ "${FORCE_TTS:-0}" != "1" ]; then
+    echo "♻️  state: tts 已完成，跳过"
 else
-    bash "$PROJECT_DIR/scripts/tts_index.sh" "$WORK_DIR/script.txt" "$WORK_DIR/audio.wav"
+    monitor_phase "tts" "running" "开始生成 TTS 音频" "$(jq -cn --arg target "$WORK_DIR/audio.wav" '{audioFile: $target}')"
+    log_step "🎙️  STEP 2: IndexTTS 声音克隆"
+    mark_running "$WORK_DIR" tts
+
+    if has_valid_audio "$WORK_DIR/audio.wav" && [ "${FORCE_TTS:-0}" != "1" ]; then
+        echo "♻️  复用已有音频: $WORK_DIR/audio.wav"
+    else
+        bash "$PROJECT_DIR/scripts/tts_index.sh" "$WORK_DIR/script.txt" "$WORK_DIR/audio.wav"
+    fi
+
+    AUDIO_DURATION=$(probe_duration "$WORK_DIR/audio.wav")
+    AUDIO_FRAMES=$(echo "$AUDIO_DURATION * 30" | bc | cut -d. -f1)
+    echo "音频时长: ${AUDIO_DURATION}s | 帧数: $AUDIO_FRAMES"
+    echo ""
+    mark_completed "$WORK_DIR" tts "$WORK_DIR/audio.wav"
+    monitor_phase "tts" "completed" "TTS 音频已就绪" "$(jq -cn --arg audioFile "$WORK_DIR/audio.wav" --arg duration "$AUDIO_DURATION" --arg frames "$AUDIO_FRAMES" '{audioFile: $audioFile, durationSeconds: ($duration | tonumber), durationFrames: ($frames | tonumber)}')"
 fi
 
-AUDIO_DURATION=$(probe_duration "$WORK_DIR/audio.wav")
-AUDIO_FRAMES=$(echo "$AUDIO_DURATION * 30" | bc | cut -d. -f1)
-echo "音频时长: ${AUDIO_DURATION}s | 帧数: $AUDIO_FRAMES"
-echo ""
-monitor_phase "tts" "completed" "TTS 音频已就绪" "$(jq -cn --arg audioFile "$WORK_DIR/audio.wav" --arg duration "$AUDIO_DURATION" --arg frames "$AUDIO_FRAMES" '{audioFile: $audioFile, durationSeconds: ($duration | tonumber), durationFrames: ($frames | tonumber)}')"
+# Ensure AUDIO_DURATION / AUDIO_FRAMES are available even when TTS is skipped
+if [ -z "${AUDIO_DURATION:-}" ]; then
+    AUDIO_DURATION=$(probe_duration "$WORK_DIR/audio.wav")
+    AUDIO_FRAMES=$(echo "$AUDIO_DURATION * 30" | bc | cut -d. -f1)
+fi
 
 CURRENT_PHASE="parallel_media"
 monitor_phase "parallel_media" "running" "并行生成字幕、场景画面与唇形视频" "$(jq -cn --arg subtitleFile "$WORK_DIR/subtitles.srt" --arg visuals "$WORK_DIR/scene_visuals.json" --arg lipSync "$WORK_DIR/lip_synced.mp4" '{subtitleFile: $subtitleFile, visualsFile: $visuals, lipSyncFile: $lipSync}')"
@@ -223,80 +278,190 @@ VISUALS_PUBLIC_DIR="$PROJECT_DIR/public/scene_visuals/$OUTPUT_NAME"
 (
     set -e
     CURRENT_PHASE="subtitles"
+    if is_phase_completed "$WORK_DIR" subtitles "$WORK_DIR/subtitles.srt" && [ "${FORCE_SUBTITLES:-0}" != "1" ]; then
+        echo "♻️  state: subtitles 已完成，跳过"
+    else
     monitor_phase "subtitles" "running" "开始生成并校准字幕" "$(jq -cn --arg subtitleFile "$WORK_DIR/subtitles.srt" '{subtitleFile: $subtitleFile}')"
+    mark_running "$WORK_DIR" subtitles
 
     if has_valid_srt "$WORK_DIR/subtitles.srt" && [ "${FORCE_SUBTITLES:-0}" != "1" ]; then
         echo "♻️  复用已校准字幕: $WORK_DIR/subtitles.srt"
     else
-        if has_valid_srt "$WORK_DIR/subtitles_raw.srt" && [ "${FORCE_WHISPER:-0}" != "1" ]; then
+        if ([ -s "$WORK_DIR/subtitles_raw.json" ] || has_valid_srt "$WORK_DIR/subtitles_raw.srt") && [ "${FORCE_WHISPER:-0}" != "1" ]; then
             echo "♻️  复用 Whisper 原始字幕，重新对齐原文"
         else
-            bash "$PROJECT_DIR/scripts/whisper_local.sh" "$WORK_DIR/audio.wav" "$WORK_DIR"
+            bash "$PROJECT_DIR/scripts/whisper_local.sh" "$WORK_DIR/audio.wav" "$WORK_DIR" "$WHISPER_MODEL"
             if [ ! -f "$WORK_DIR/audio.srt" ]; then
                 echo "❌ Whisper 未生成 audio.srt" >&2
                 exit 1
             fi
             mv -f "$WORK_DIR/audio.srt" "$WORK_DIR/subtitles_raw.srt"
+            if [ -f "$WORK_DIR/audio.json" ]; then
+                mv -f "$WORK_DIR/audio.json" "$WORK_DIR/subtitles_raw.json"
+            fi
         fi
         echo "📝 用原文校准字幕..."
-        python3 "$PROJECT_DIR/scripts/align_subtitles.py" \
+        if [ -s "$WORK_DIR/subtitles_raw.json" ]; then
+            RAW_INPUT="$WORK_DIR/subtitles_raw.json"
+        else
+            RAW_INPUT="$WORK_DIR/subtitles_raw.srt"
+        fi
+        if ! python3 "$PROJECT_DIR/scripts/align_subtitles.py" \
             "$WORK_DIR/script.txt" \
-            "$WORK_DIR/subtitles_raw.srt" \
-            "$WORK_DIR/subtitles.srt"
+            "$RAW_INPUT" \
+            "$WORK_DIR/subtitles.srt"; then
+            echo "❌ 字幕校准失败：口播稿与音频内容不一致。" >&2
+            echo "   当复用旧音频时，必须同时复用对应口播稿（script.txt）。" >&2
+            exit 1
+        fi
     fi
 
     echo "字幕文件: $WORK_DIR/subtitles.srt"
+    mark_completed "$WORK_DIR" subtitles "$WORK_DIR/subtitles.srt"
     monitor_phase "subtitles" "completed" "字幕文件已就绪" "$(jq -cn --arg subtitleFile "$WORK_DIR/subtitles.srt" '{subtitleFile: $subtitleFile}')"
+    fi
+
+    STORYBOARD_JSON="${STORYBOARD_JSON:-$WORK_DIR/storyboard.json}"
+    VISUALS_JSON="${VISUALS_JSON:-$WORK_DIR/scene_visuals.json}"
+
+    CURRENT_PHASE="storyboard"
+    if is_phase_completed "$WORK_DIR" storyboard "$STORYBOARD_JSON" && [ "${FORCE_STORYBOARD:-0}" != "1" ]; then
+        echo "♻️  state: storyboard 已完成，跳过"
+    else
+        monitor_phase "storyboard" "running" "开始生成分镜脚本" "$(jq -cn --arg storyboard "$WORK_DIR/storyboard.json" '{storyboardFile: $storyboard}')"
+        mark_running "$WORK_DIR" storyboard
+        STORYBOARD_JSON="$WORK_DIR/storyboard.json"
+        if has_valid_storyboard "$STORYBOARD_JSON" && [ "${FORCE_STORYBOARD:-0}" != "1" ]; then
+            echo "♻️  复用已生成分镜脚本: $STORYBOARD_JSON"
+        else
+            node "$PROJECT_DIR/scripts/generate_storyboard.js" \
+                "$WORK_DIR/subtitles.srt" \
+                "$STORYBOARD_JSON" \
+                "$PROFILE" \
+                "$VIDEO_TITLE"
+        fi
+        if storyboard_enabled && ! has_valid_storyboard "$STORYBOARD_JSON"; then
+            echo "❌ 分镜脚本生成失败或无效: $STORYBOARD_JSON" >&2
+            exit 1
+        fi
+        mark_completed "$WORK_DIR" storyboard "$STORYBOARD_JSON"
+        monitor_phase "storyboard" "completed" "分镜脚本已就绪" "$(jq -cn --arg storyboard "$STORYBOARD_JSON" '{storyboardFile: $storyboard}')"
+    fi
 
     CURRENT_PHASE="visuals"
-    monitor_phase "visuals" "running" "开始准备正文场景画面" "$(jq -cn --arg visuals "$VISUALS_JSON" '{visualsFile: $visuals}')"
-    if has_valid_scene_visuals "$VISUALS_JSON" && [ "${FORCE_VISUALS:-0}" != "1" ]; then
-        echo "♻️  复用已生成场景画面清单: $VISUALS_JSON"
+    if is_phase_completed "$WORK_DIR" visuals "$VISUALS_JSON" && [ "${FORCE_VISUALS:-0}" != "1" ]; then
+        echo "♻️  state: visuals 已完成，跳过"
     else
-        mkdir -p "$VISUALS_PUBLIC_DIR"
-        node "$PROJECT_DIR/scripts/prepare_scene_visuals.js" \
-            "$WORK_DIR/subtitles.srt" \
-            "$VISUALS_JSON" \
-            "$VISUALS_PUBLIC_DIR" \
-            "$VIDEO_TITLE"
+        monitor_phase "visuals" "running" "开始准备正文场景画面" "$(jq -cn --arg visuals "$VISUALS_JSON" '{visualsFile: $visuals}')"
+        mark_running "$WORK_DIR" visuals
+        if has_valid_scene_visuals "$VISUALS_JSON" && [ "${FORCE_VISUALS:-0}" != "1" ]; then
+            echo "♻️  复用已生成场景画面清单: $VISUALS_JSON"
+        else
+            mkdir -p "$VISUALS_PUBLIC_DIR"
+            node "$PROJECT_DIR/scripts/prepare_scene_visuals.js" \
+                "$WORK_DIR/subtitles.srt" \
+                "$VISUALS_JSON" \
+                "$VISUALS_PUBLIC_DIR" \
+                "$VIDEO_TITLE" \
+                "$PROFILE" \
+                "$STORYBOARD_JSON"
+        fi
+        echo "场景画面清单: $VISUALS_JSON"
+        mark_completed "$WORK_DIR" visuals "$VISUALS_JSON"
+        monitor_phase "visuals" "completed" "正文场景画面已就绪" "$(jq -cn --arg visuals "$VISUALS_JSON" '{visualsFile: $visuals}')"
     fi
-    echo "场景画面清单: $VISUALS_JSON"
-    monitor_phase "visuals" "completed" "正文场景画面已就绪" "$(jq -cn --arg visuals "$VISUALS_JSON" '{visualsFile: $visuals}')"
 ) &
 SUBTITLES_VISUALS_PID=$!
 
-# 子任务 B：主播照片缩放 + MuseTalk 唇形同步 + FFmpeg 后处理
+# 子任务 B：主播照片缩放 + InfiniteTalk 唇形同步 + FFmpeg 后处理
 (
     set -e
-    CURRENT_PHASE="musetalk"
-    monitor_phase "musetalk" "running" "开始 MuseTalk 唇形同步" "$(jq -cn --arg outputFile "$WORK_DIR/lip_synced_raw.mp4" '{videoFile: $outputFile}')"
-
-    HOST_PHOTO=$(jq -r '.host.photo_source' "$PROFILE")
-    HOST_RESIZED="$WORK_DIR/host_resized.jpg"
-
-    if [ ! -s "$HOST_RESIZED" ]; then
-        echo "🖼️  缩放主播照片..."
-        resize_host_image "$PROJECT_DIR/$HOST_PHOTO" "$HOST_RESIZED"
-    fi
-
-    if video_matches_audio "$WORK_DIR/lip_synced_raw.mp4" "$AUDIO_DURATION" && [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
-        echo "♻️  复用已有 MuseTalk 原始结果: $WORK_DIR/lip_synced_raw.mp4"
+    CURRENT_PHASE="infinitetalk"
+    if is_phase_completed "$WORK_DIR" lipsync "$WORK_DIR/lip_synced_raw.mp4" && [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
+        echo "♻️  state: lipsync 已完成，跳过"
     else
-        bash "$PROJECT_DIR/scripts/musetalk.sh" "$HOST_RESIZED" "$WORK_DIR/audio.wav" "$WORK_DIR/lip_synced_raw.mp4"
-    fi
-    monitor_phase "musetalk" "completed" "MuseTalk 原始结果已就绪" "$(jq -cn --arg rawVideo "$WORK_DIR/lip_synced_raw.mp4" '{rawVideoFile: $rawVideo}')"
+        monitor_phase "infinitetalk" "running" "开始 InfiniteTalk 唇形同步" "$(jq -cn --arg outputFile "$WORK_DIR/lip_synced_raw.mp4" '{videoFile: $outputFile}')"
+        mark_running "$WORK_DIR" lipsync
 
-    echo "🎨 后处理唇形视频（统一分辨率与帧率）..."
+        HOST_PHOTO=$(jq -r '.host.photo_source' "$PROFILE")
+        HOST_RESIZED="$WORK_DIR/host_resized.jpg"
+
+        if [ ! -s "$HOST_RESIZED" ]; then
+            echo "🖼️  缩放主播照片..."
+            resize_host_image "$PROJECT_DIR/$HOST_PHOTO" "$HOST_RESIZED"
+        fi
+
+        if video_matches_audio "$WORK_DIR/lip_synced_raw.mp4" "$AUDIO_DURATION" && [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
+            echo "♻️  复用已有 InfiniteTalk 原始结果: $WORK_DIR/lip_synced_raw.mp4"
+        else
+            # Prefer ComfyUI API on primary server when available, fallback to CLI
+            PRIMARY_IT_PATH=$(jq -r '.primary.infinitetalk_path // ""' "$CONFIG")
+            if [ -n "$PRIMARY_IT_PATH" ] && [ "$PRIMARY_IT_PATH" != "null" ]; then
+                USE_SERVER_SIDE=$(jq -r '.primary.use_server_side // "true"' "$CONFIG")
+                if [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "true" ] || [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "1" ]; then
+                    echo "🎬 使用服务器端 ComfyUI API 进行 InfiniteTalk 唇形同步（无本地 SSH 隧道）..."
+                    if [ "${FORCE_LIPSYNC:-0}" = "1" ]; then
+                        echo "🧹 FORCE_LIPSYNC=1，清除已有分段缓存"
+                        rm -f "$WORK_DIR"/lip_synced_raw_seg*.mp4
+                    fi
+                    bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
+                        --config "$CONFIG" \
+                        --profile "$PROFILE" \
+                        --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
+                        --image "$HOST_RESIZED" \
+                        --audio "$WORK_DIR/audio.wav" \
+                        --output "$WORK_DIR/lip_synced_raw.mp4" \
+                        --work-dir "$WORK_DIR" \
+                        --resume
+                else
+                echo "🎬 使用本地 ComfyUI API 进行 InfiniteTalk 唇形同步（SSH 隧道）..."
+                GEN_ARGS=(
+                    --config "$CONFIG"
+                    --profile "$PROFILE"
+                    --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json"
+                    --image "$HOST_RESIZED"
+                    --audio "$WORK_DIR/audio.wav"
+                    --output "$WORK_DIR/lip_synced_raw.mp4"
+                    --work-dir "$WORK_DIR"
+                    --use-tunnel
+                )
+                if [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
+                    GEN_ARGS+=(--resume)
+                else
+                    echo "🧹 FORCE_LIPSYNC=1，清除已有分段缓存"
+                    rm -f "$WORK_DIR"/lip_synced_raw_seg*.mp4
+                fi
+                python3 "$PROJECT_DIR/scripts/comfyui/generate_segments.py" "${GEN_ARGS[@]}"
+            fi
+        else
+            echo "🎬 使用 InfiniteTalk CLI 进行唇形同步..."
+            bash "$PROJECT_DIR/scripts/infinitetalk.sh" "$HOST_RESIZED" "$WORK_DIR/audio.wav" "$WORK_DIR/lip_synced_raw.mp4"
+        fi
+    fi
+    mark_completed "$WORK_DIR" lipsync "$WORK_DIR/lip_synced_raw.mp4"
+    monitor_phase "infinitetalk" "completed" "InfiniteTalk 原始结果已就绪" "$(jq -cn --arg rawVideo "$WORK_DIR/lip_synced_raw.mp4" '{rawVideoFile: $rawVideo}')"
+    fi
+
     CURRENT_PHASE="postprocess"
-    monitor_phase "postprocess" "running" "开始后处理唇形视频" "$(jq -cn --arg rawVideo "$WORK_DIR/lip_synced_raw.mp4" --arg outputFile "$WORK_DIR/lip_synced.mp4" '{rawVideoFile: $rawVideo, outputFile: $outputFile}')"
-    if video_matches_audio "$WORK_DIR/lip_synced.mp4" "$AUDIO_DURATION" && [ "${FORCE_POSTPROCESS:-0}" != "1" ]; then
-        echo "♻️  复用已有后处理视频: $WORK_DIR/lip_synced.mp4"
+    if is_phase_completed "$WORK_DIR" postprocess "$WORK_DIR/lip_synced.mp4" && [ "${FORCE_POSTPROCESS:-0}" != "1" ]; then
+        echo "♻️  state: postprocess 已完成，跳过"
     else
-        ffmpeg -y -i "$WORK_DIR/lip_synced_raw.mp4" \
-            -vf "scale=720:960:force_original_aspect_ratio=decrease,pad=720:960:(ow-iw)/2:(oh-ih)/2" \
-            -r 30 -c:v libx264 -pix_fmt yuv420p -c:a aac "$WORK_DIR/lip_synced.mp4"
+        echo "🎨 后处理唇形视频（统一分辨率与帧率）..."
+        monitor_phase "postprocess" "running" "开始后处理唇形视频" "$(jq -cn --arg rawVideo "$WORK_DIR/lip_synced_raw.mp4" --arg outputFile "$WORK_DIR/lip_synced.mp4" '{rawVideoFile: $rawVideo, outputFile: $outputFile}')"
+        mark_running "$WORK_DIR" postprocess
+        if video_matches_audio "$WORK_DIR/lip_synced.mp4" "$AUDIO_DURATION" && [ "${FORCE_POSTPROCESS:-0}" != "1" ]; then
+            echo "♻️  复用已有后处理视频: $WORK_DIR/lip_synced.mp4"
+        else
+            RAW_DURATION=$(probe_duration "$WORK_DIR/lip_synced_raw.mp4")
+            RATIO=$(echo "scale=6; $AUDIO_DURATION / $RAW_DURATION" | bc -l)
+            echo "⏱️  拉伸唇形视频以匹配音频 (系数 $RATIO, 音频 $AUDIO_DURATION s / 原始 $RAW_DURATION s)..."
+            ffmpeg -y -i "$WORK_DIR/lip_synced_raw.mp4" \
+                -vf "setpts=PTS*$RATIO,scale=720:960:force_original_aspect_ratio=decrease,pad=720:960:(ow-iw)/2:(oh-ih)/2" \
+                -r 30 -t "$AUDIO_DURATION" -c:v libx264 -pix_fmt yuv420p -an "$WORK_DIR/lip_synced.mp4"
+        fi
+        mark_completed "$WORK_DIR" postprocess "$WORK_DIR/lip_synced.mp4"
+        monitor_phase "postprocess" "completed" "后处理视频已就绪" "$(jq -cn --arg outputFile "$WORK_DIR/lip_synced.mp4" '{outputFile: $outputFile}')"
     fi
-    monitor_phase "postprocess" "completed" "后处理视频已就绪" "$(jq -cn --arg outputFile "$WORK_DIR/lip_synced.mp4" '{outputFile: $outputFile}')"
 ) &
 LIPSYNC_PID=$!
 
@@ -479,12 +644,14 @@ fi
 
 monitor_phase "render_prepare" "completed" "Remotion 输入文件已准备完成" "$(jq -cn --arg props "$PROJECT_DIR/public/props.json" --arg expected "$EXPECTED_DURATION" '{propsFile: $props, expectedDurationSeconds: ($expected | tonumber)}')"
 
-if has_valid_video "$FINAL_VIDEO" "$MIN_VIDEO_DURATION" && has_valid_cover "$FINAL_COVER" && [ "${FORCE_RENDER:-0}" != "1" ]; then
+if is_phase_completed "$WORK_DIR" render "$FINAL_VIDEO" && has_valid_cover "$FINAL_COVER" && [ "${FORCE_RENDER:-0}" != "1" ]; then
+    echo "♻️  state: render 已完成，跳过"
     echo "♻️  复用已生成成片: $FINAL_VIDEO"
     echo "♻️  复用已生成封面: $FINAL_COVER"
 else
     CURRENT_PHASE="render"
     monitor_phase "render" "running" "开始 Remotion 最终渲染" "$(jq -cn --arg outputFile "$FINAL_VIDEO" --arg coverFile "$FINAL_COVER" --arg totalFrames "$TOTAL_FRAMES" '{outputFile: $outputFile, coverFile: $coverFile, totalFrames: ($totalFrames | tonumber)}')"
+    mark_running "$WORK_DIR" render
     npx remotion render src/index.tsx TalkingHeadVideo \
         --props public/props.json \
         --duration-in-frames "$TOTAL_FRAMES" \
@@ -496,6 +663,7 @@ else
         --props public/props.json \
         --frame "$COVER_FRAME" \
         "$FINAL_COVER"
+    mark_completed "$WORK_DIR" render "$FINAL_VIDEO"
 fi
 
 if ! has_valid_video "$FINAL_VIDEO" "$MIN_VIDEO_DURATION"; then

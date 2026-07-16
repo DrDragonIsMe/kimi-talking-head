@@ -16,7 +16,7 @@ const { URL } = require('url');
 // Try to load .env if dotenv is installed
 let envLoaded = false;
 try {
-  require('dotenv').config();
+  require('dotenv').config({ quiet: true });
   envLoaded = true;
 } catch (_e) {
   // dotenv not installed, rely on process.env

@@ -7,27 +7,70 @@ OUTPUT_AUDIO=$2
 CONFIG="config/servers.json"
 PROFILE="${PROFILE:-config/host_profile.json}"
 RUN_ID="${PIPELINE_RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
+SSH_OPTS="-o ServerAliveInterval=60 -o ServerAliveCountMax=7"
 
 TEXT=$(cat "$TEXT_FILE" | tr '\n' ' ' | sed 's/  */ /g')
 REFERENCE_AUDIO=$(jq -r '.voice.reference_audio' $PROFILE)
 
-REF_BASENAME=$(basename "$REFERENCE_AUDIO")
-echo "🎙️ 上传参考音频到服务器..."
-SERVER_INFO=$(bash scripts/upload_to_server.sh "$REFERENCE_AUDIO" "voice_ref/$REF_BASENAME")
-HOST=$(echo "$SERVER_INFO" | cut -d: -f1)
-PORT=$(echo "$SERVER_INFO" | cut -d: -f2)
-USER=$(echo "$SERVER_INFO" | cut -d: -f3)
-WORKSPACE=$(echo "$SERVER_INFO" | cut -d: -f4)
-
-if [ "$HOST" = "$(jq -r '.primary.host' $CONFIG)" ]; then
-    TTS_PATH=$(jq -r '.primary.tts_path' $CONFIG)
-    TTS_VENV=$(jq -r '.primary.tts_python_env' $CONFIG)
-else
-    TTS_PATH=$(jq -r '.backup.tts_path' $CONFIG)
-    TTS_VENV=$(jq -r '.backup.tts_python_env' $CONFIG)
+# IndexTTS 的 librosa 后端在服务器上可能不支持 m4a/mp3，先转换为 wav
+REF_EXT=$(echo "${REFERENCE_AUDIO##*.}" | tr '[:upper:]' '[:lower:]')
+if [ "$REF_EXT" != "wav" ]; then
+    REF_BASENAME_NOEXT="$(basename "$REFERENCE_AUDIO" | sed 's/\.[^.]*$//').wav"
+    REF_CONVERTED="${TEMP_DIR:-/tmp}/tts_ref_${RUN_ID}_${REF_BASENAME_NOEXT}"
+    echo "🎙️ 转换参考音频为 WAV 格式: $REF_CONVERTED" >&2
+    ffmpeg -y -i "$REFERENCE_AUDIO" -ar 24000 -ac 1 -c:a pcm_s16le "$REF_CONVERTED" >/dev/null 2>&1
+    REFERENCE_AUDIO="$REF_CONVERTED"
 fi
 
-TTS_ROOT=$(dirname "$TTS_PATH")
+REF_BASENAME=$(basename "$REFERENCE_AUDIO")
+
+# Pick a server that actually has IndexTTS installed (remote_worker.py present).
+# Primary may only host InfiniteTalk lip-sync, so fall back to backup when needed.
+pick_tts_server() {
+    for key in primary backup; do
+        local host port user tts_path workspace
+        host=$(jq -r ".${key}.host" $CONFIG)
+        port=$(jq -r ".${key}.port" $CONFIG)
+        user=$(jq -r ".${key}.user" $CONFIG)
+        tts_path=$(jq -r ".${key}.tts_path" $CONFIG)
+        workspace=$(jq -r ".${key}.tts_workspace" $CONFIG)
+        if [ -z "$tts_path" ] || [ "$tts_path" = "null" ] || [ "$tts_path" = "" ]; then
+            continue
+        fi
+        if ssh -p "$port" $SSH_OPTS "$user@$host" "[ -f \"$tts_path/remote_worker.py\" ]" 2>/dev/null; then
+            echo "${key}:${host}:${port}:${user}:${workspace}:${tts_path}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+SERVER_INFO=$(pick_tts_server)
+if [ -z "$SERVER_INFO" ]; then
+    echo "❌ 找不到可用的 IndexTTS 服务器（remote_worker.py 不存在）" >&2
+    exit 1
+fi
+
+SERVER_KEY=$(echo "$SERVER_INFO" | cut -d: -f1)
+HOST=$(echo "$SERVER_INFO" | cut -d: -f2)
+PORT=$(echo "$SERVER_INFO" | cut -d: -f3)
+USER=$(echo "$SERVER_INFO" | cut -d: -f4)
+WORKSPACE=$(echo "$SERVER_INFO" | cut -d: -f5)
+TTS_PATH=$(echo "$SERVER_INFO" | cut -d: -f6)
+TTS_VENV=$(jq -r ".${SERVER_KEY}.tts_python_env" $CONFIG)
+
+echo "🎙️ 上传参考音频到服务器（$SERVER_KEY: $HOST:$PORT）..."
+REMOTE_DIR="$WORKSPACE/voice_ref"
+ssh -p "$PORT" $SSH_OPTS "$USER@$HOST" "mkdir -p $REMOTE_DIR"
+scp -P "$PORT" -o ServerAliveInterval=60 -o ServerAliveCountMax=7 "$REFERENCE_AUDIO" "$USER@$HOST:$REMOTE_DIR/$REF_BASENAME"
+
+# TTS_PATH may be either the directory containing remote_worker.py or a wrapper
+# script; derive the root directory accordingly.
+if ssh -p "$PORT" $SSH_OPTS "$USER@$HOST" "[ -d \"$TTS_PATH\" ] && [ -f \"$TTS_PATH/remote_worker.py\" ]" 2>/dev/null; then
+    TTS_ROOT="$TTS_PATH"
+else
+    TTS_ROOT=$(dirname "$TTS_PATH")
+fi
 MODEL_DIR="$TTS_ROOT/checkpoints"
 
 echo "🎙️ 在服务器生成 TTS 音频..."
@@ -36,7 +79,13 @@ echo "   TTS 根目录: $TTS_ROOT"
 echo "   模型目录: $MODEL_DIR"
 
 if [ -n "$TTS_VENV" ] && [ "$TTS_VENV" != "" ] && [ "$TTS_VENV" != "null" ]; then
-    if echo "$TTS_VENV" | grep -q "activate"; then
+    # Conda envs expose .../envs/<name>/bin/activate; use conda shell hook to avoid
+    # "conda: command not found" or broken source of the activate script.
+    if [[ "$TTS_VENV" =~ /envs/([^/]+)/bin/activate$ ]]; then
+        CONDA_ENV="${BASH_REMATCH[1]}"
+        CONDA_ROOT="${TTS_VENV%/envs/$CONDA_ENV/bin/activate}"
+        ACTIVATE_CMD="source \"$CONDA_ROOT/etc/profile.d/conda.sh\" && conda activate \"$CONDA_ENV\""
+    elif echo "$TTS_VENV" | grep -q "activate"; then
         ACTIVATE_CMD="source $TTS_VENV"
     else
         ACTIVATE_CMD="conda activate $TTS_VENV"
@@ -92,7 +141,7 @@ printf -v REMOTE_JOB_Q '%q' "$REMOTE_JOB"
 printf -v REMOTE_STATUS_Q '%q' "$REMOTE_STATUS"
 
 echo "🚀 通过 nohup 提交远端后台 TTS 任务..."
-ssh -p $PORT $USER@$HOST << EOF
+ssh -p $PORT $SSH_OPTS $USER@$HOST << EOF
     set -e
     mkdir -p "$WORKSPACE/output"
     rm -f "$REMOTE_STATUS" "$REMOTE_PID" "$REMOTE_LOG" "$REMOTE_JOB" "$REMOTE_RUNNER"
@@ -116,7 +165,7 @@ REMOTE_RUNNER_EOF
     echo \$! > "$REMOTE_PID"
 EOF
 
-REMOTE_PID_VALUE=$(ssh -p $PORT $USER@$HOST "cat '$REMOTE_PID' 2>/dev/null || echo ''")
+REMOTE_PID_VALUE=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "cat '$REMOTE_PID' 2>/dev/null || echo ''")
 if [ -z "$REMOTE_PID_VALUE" ]; then
     echo "❌ 远端 TTS 任务未能启动" >&2
     exit 1
@@ -130,11 +179,11 @@ while true; do
     poll_count=$((poll_count + 1))
     if [ "$poll_count" -gt "$max_poll" ]; then
         echo "❌ 远端 TTS 任务超时（>${MAX_POLL_MINUTES}分钟），强制终止" >&2
-        ssh -p $PORT $USER@$HOST "kill '$REMOTE_PID_VALUE' 2>/dev/null || true" || true
+        ssh -p $PORT $SSH_OPTS $USER@$HOST "kill '$REMOTE_PID_VALUE' 2>/dev/null || true" || true
         exit 1
     fi
 
-    STATUS_OUTPUT=$(ssh -p $PORT $USER@$HOST "
+    STATUS_OUTPUT=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "
         set -e
         if [ -f '$REMOTE_STATUS' ]; then
             printf 'status=%s\n' \"\$(cat '$REMOTE_STATUS')\"
@@ -154,7 +203,7 @@ while true; do
 
     case "$STATUS_OUTPUT" in
         status=0*)
-            REMOTE_SUMMARY=$(ssh -p $PORT $USER@$HOST "
+            REMOTE_SUMMARY=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "
                 set -e
                 if [ ! -s '$REMOTE_OUTPUT' ]; then
                     echo 'missing_output'
@@ -173,7 +222,7 @@ while true; do
             ;;
         status=*)
             echo "❌ 远端 TTS 任务失败，日志尾部如下：" >&2
-            ssh -p $PORT $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
+            ssh -p $PORT $SSH_OPTS $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
             exit 1
             ;;
         running*)
@@ -185,14 +234,14 @@ while true; do
             ;;
         *)
             echo "❌ 远端 TTS 任务状态异常：$STATUS_OUTPUT" >&2
-            ssh -p $PORT $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
+            ssh -p $PORT $SSH_OPTS $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
             exit 1
             ;;
     esac
 done
 
 echo "📥 下载 TTS 音频到本地..."
-scp -P $PORT "$USER@$HOST:$REMOTE_OUTPUT" "$OUTPUT_AUDIO"
+scp -P $PORT -o ServerAliveInterval=60 -o ServerAliveCountMax=7 "$USER@$HOST:$REMOTE_OUTPUT" "$OUTPUT_AUDIO"
 
 if ! has_valid_local_audio "$OUTPUT_AUDIO"; then
     echo "❌ 下载后的 TTS 音频无效或时长过短: $OUTPUT_AUDIO" >&2

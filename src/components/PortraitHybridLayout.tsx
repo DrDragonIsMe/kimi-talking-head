@@ -23,6 +23,7 @@ interface PortraitHybridLayoutProps {
   title: string;
   chapters?: Array<{ start: number; end: number; title: string }>;
   hybridConfig?: {
+    preset?: 'default' | 'host-focus' | 'visual-focus' | 'minimal' | 'balanced';
     mainVisualRatio?: number;
     mainVisualBorderRadius?: number;
     hostPosition?: string;
@@ -51,6 +52,79 @@ interface PortraitHybridLayoutProps {
 const CANVAS_WIDTH = 1080;
 const CANVAS_HEIGHT = 1920;
 
+type HybridConfig = NonNullable<PortraitHybridLayoutProps['hybridConfig']>;
+
+const HYBRID_PRESETS: Record<
+  string,
+  Required<Pick<HybridConfig, 'mainVisualRatio' | 'hostWindowWidth' | 'hostWindowHeight'>> & HybridConfig
+> = {
+  default: {
+    mainVisualRatio: 0.58,
+    hostWindowWidth: 560,
+    hostWindowHeight: 640,
+    showSubtitles: true,
+    showTalkingPoints: true,
+    showProgressBreadcrumb: true,
+    showChapterCards: true,
+    showDataBars: false,
+    showQuoteHighlight: false,
+    topicTag: { enabled: true, label: '核心解读' },
+    brandBadge: { enabled: true, text: '' },
+  },
+  'host-focus': {
+    mainVisualRatio: 0.38,
+    hostWindowWidth: 840,
+    hostWindowHeight: 960,
+    showSubtitles: true,
+    showTalkingPoints: false,
+    showProgressBreadcrumb: false,
+    showChapterCards: false,
+    showDataBars: false,
+    showQuoteHighlight: false,
+    topicTag: { enabled: true, label: '核心解读' },
+    brandBadge: { enabled: false, text: '' },
+  },
+  'visual-focus': {
+    mainVisualRatio: 0.72,
+    hostWindowWidth: 440,
+    hostWindowHeight: 500,
+    showSubtitles: true,
+    showTalkingPoints: false,
+    showProgressBreadcrumb: true,
+    showChapterCards: false,
+    showDataBars: false,
+    showQuoteHighlight: false,
+    topicTag: { enabled: true, label: '核心解读' },
+    brandBadge: { enabled: true, text: '' },
+  },
+  minimal: {
+    mainVisualRatio: 0.5,
+    hostWindowWidth: 640,
+    hostWindowHeight: 720,
+    showSubtitles: true,
+    showTalkingPoints: false,
+    showProgressBreadcrumb: false,
+    showChapterCards: false,
+    showDataBars: false,
+    showQuoteHighlight: false,
+    topicTag: { enabled: false, label: '核心解读' },
+    brandBadge: { enabled: false, text: '' },
+  },
+  balanced: {
+    mainVisualRatio: 0.5,
+    hostWindowWidth: 640,
+    hostWindowHeight: 720,
+    showSubtitles: true,
+    showTalkingPoints: true,
+    showProgressBreadcrumb: true,
+    showChapterCards: true,
+    showDataBars: false,
+    showQuoteHighlight: false,
+    topicTag: { enabled: true, label: '核心解读' },
+    brandBadge: { enabled: true, text: '' },
+  },
+};
+
 export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
   srtPath,
   subtitles,
@@ -62,12 +136,15 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
   brand,
   tagline,
   title,
-  hybridConfig = {},
+  hybridConfig: rawHybridConfig = {},
   chapters = [],
 }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
   const currentTime = frame / fps;
+
+  const preset = HYBRID_PRESETS[rawHybridConfig.preset ?? 'default'] ?? HYBRID_PRESETS.default;
+  const hybridConfig = { ...preset, ...rawHybridConfig };
 
   const mainVisualRatio = hybridConfig.mainVisualRatio ?? 0.58;
   const mainVisualHeight = Math.round(CANVAS_HEIGHT * mainVisualRatio);

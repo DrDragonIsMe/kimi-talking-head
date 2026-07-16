@@ -19,7 +19,9 @@ if [ "$DETECTED" != "true" ]; then
     exit 1
 fi
 
-if ssh -p $PORT -o ConnectTimeout=3 -o BatchMode=yes $USER@$HOST "echo OK" >/dev/null 2>&1; then
+SSH_OPTS="-o ConnectTimeout=3 -o BatchMode=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=7"
+
+if ssh -p $PORT $SSH_OPTS $USER@$HOST "echo OK" >/dev/null 2>&1; then
     echo "AVAILABLE:$HOST:$PORT:$USER"
     exit 0
 else
