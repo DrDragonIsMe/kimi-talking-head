@@ -82,7 +82,7 @@ run_remote() {
 
 # If resume and local output already valid, skip entirely
 if [[ "$RESUME" == "1" && -s "$LOCAL_OUTPUT" ]]; then
-  DUR=$(ffprobe -v error -show_entries format=duration -of default=noprintwrappers=1:nokey=1 "$LOCAL_OUTPUT" 2>/dev/null || true)
+  DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$LOCAL_OUTPUT" 2>/dev/null || true)
   if [[ -n "$DUR" && "${DUR%.*}" -gt 0 ]]; then
     echo "♻️  本地已有有效输出，跳过服务器端生成: $LOCAL_OUTPUT"
     exit 0
@@ -199,7 +199,7 @@ mkdir -p "$(dirname "$LOCAL_OUTPUT")"
 rsync -avz -e "$RSYNC_SSH" "$USER@$HOST:$REMOTE_DIR/$OUTPUT" "$LOCAL_OUTPUT"
 
 # Validate downloaded output
-DUR=$(ffprobe -v error -show_entries format=duration -of default=noprintwrappers=1:nokey=1 "$LOCAL_OUTPUT" 2>/dev/null || true)
+DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$LOCAL_OUTPUT" 2>/dev/null || true)
 if [[ -z "$DUR" || "${DUR%.*}" -le 0 ]]; then
   echo "❌ 下载后的视频时长异常: $LOCAL_OUTPUT" >&2
   exit 1
