@@ -424,8 +424,12 @@ def queue_is_empty(base_url):
         return False
 
 
-def poll_history(base_url, prompt_id, timeout=3600, interval=5):
-    """Poll ComfyUI history until prompt completes."""
+def poll_history(base_url, prompt_id, timeout=3600, interval=5, log_interval=60):
+    """Poll ComfyUI history until prompt completes.
+
+    Logs a heartbeat every ``log_interval`` seconds so long-running inference
+    does not look frozen in the orchestrator output.
+    """
     print(f"Polling prompt {prompt_id} ...")
     start = time.time()
     last_log = start
@@ -458,7 +462,7 @@ def poll_history(base_url, prompt_id, timeout=3600, interval=5):
             if missing_count >= 12 and queue_is_empty(base_url):
                 raise PromptLostError(f"Prompt {prompt_id} lost: not in history and queue empty")
         now = time.time()
-        if now - last_log >= 300:
+        if now - last_log >= log_interval:
             print(f"Still waiting for {prompt_id} ({now - start:.0f}s elapsed)...")
             last_log = now
         time.sleep(interval)

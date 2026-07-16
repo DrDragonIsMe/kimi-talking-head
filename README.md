@@ -44,40 +44,67 @@
 
 ## 安装
 
+### 1. 克隆并安装依赖
+
 ```bash
 git clone <repo> ~/kimi-talking-head
 cd ~/kimi-talking-head
 npm install
+```
 
-# 复制示例配置
+### 2. 复制并填写配置
+
+```bash
+# 主播照片、参考音频、品牌文案等
 cp config/host_profile.example.json config/host_profile.json
+
+# 服务器连接信息
 cp config/servers.example.json config/servers.json
 
-# 按需填写 .env
+# API Key、模型路径等环境变量
 cp .env.example .env
 ```
 
-首次运行前探测服务器路径：
+编辑 `config/host_profile.json`，至少填写：
+
+| 字段 | 说明 |
+|------|------|
+| `host.photo_source` | 主播照片路径 |
+| `voice.reference_audio` | 声音克隆参考音频路径 |
+| `template` | `editorial` 或 `product-launch` |
+| `video_layout.hybrid.preset` | `default / host-focus / visual-focus / minimal / balanced` |
+| `title_card.title` | 视频标题 |
+| `product.*` | 品牌文案、颜色、结尾卡信息 |
+
+### 3. 探测服务器路径
 
 ```bash
 bash scripts/detect_paths.sh
 ```
 
-`config/servers.json` 会被自动更新；`config/host_profile.json` 需要手动填写主播照片、参考音频、品牌文案等。
+`config/servers.json` 会被自动更新；`config/host_profile.json` 需要手动填写。
 
 ---
 
 ## 快速开始
 
-### 完整流程（新视频）
+### 完整流程：文档 → 视频
 
 ```bash
 bash scripts/pipeline.sh path/to/article.md my_video
 ```
 
-输出：`output/my_video.mp4` 和 `output/my_video_cover.png`。
+- `path/to/article.md`：你的 Markdown / 纯文本文章
+- `my_video`：输出名称，决定 `temp/my_video/` 和 `output/my_video.*`
 
-### 只改标题/风格，复用已有音频和唇形视频
+输出产物：
+
+- `output/my_video.mp4`：最终 1080×1920 竖屏口播视频
+- `output/my_video_cover.png`：1080×1920 封面图
+
+### 媒体复用：只改标题/风格，跳过 GPU
+
+如果你已经跑过一次 `my_video`，现在只想换标题、换配色、换模板或修改口播稿文字，可以复用已有的 TTS 音频和原始唇形视频，避免重新跑 IndexTTS 和 InfiniteTalk：
 
 ```bash
 bash scripts/render_with_reused_media.sh \
@@ -87,7 +114,41 @@ bash scripts/render_with_reused_media.sh \
   temp/my_video/lip_synced_raw.mp4
 ```
 
-该脚本会自动复用源口播稿，避免新口播稿与旧音频不匹配。
+该脚本会：
+
+1. 复用 `audio.wav` 和 `lip_synced_raw.mp4`
+2. 重新 Whisper 生成字幕并用口播稿对齐
+3. 重新生成分镜和场景画面
+4. 用新的 `host_profile.json` 配置重新 Remotion 渲染
+
+> ⚠️ 注意：复用媒体时务必使用 `render_with_reused_media.sh`，不要直接用 `pipeline.sh`。该脚本会自动复用源口播稿，避免新口播稿与旧音频不匹配。
+
+### 强制重跑某个阶段
+
+流水线默认断点续跑。如果想强制重新生成某个阶段：
+
+```bash
+FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
+```
+
+可用 `FORCE_*` 变量：
+
+`FORCE_SCRIPT`, `FORCE_TTS`, `FORCE_WHISPER`, `FORCE_SUBTITLES`, `FORCE_STORYBOARD`, `FORCE_VISUALS`, `FORCE_LIPSYNC`, `FORCE_POSTPROCESS`, `FORCE_RENDER`
+
+> 提示：`FORCE_STORYBOARD=1` 会自动触发 `FORCE_VISUALS=1`，因为分镜变化后场景画面通常也需要重生成。
+
+---
+
+## 常用命令速查
+
+| 目的 | 命令 |
+|------|------|
+| 完整生成新视频 | `bash scripts/pipeline.sh path/to/article.md my_video` |
+| 复用音频/唇视频重新渲染 | `bash scripts/render_with_reused_media.sh article.md my_video_v2 temp/my_video/audio.wav temp/my_video/lip_synced_raw.mp4` |
+| 探测服务器路径 | `bash scripts/detect_paths.sh` |
+| 强制重跑字幕阶段 | `FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video` |
+| 预览 Remotion 组件 | `npm run dev` |
+| TypeScript 检查 | `npm run build` |
 
 ---
 
@@ -106,14 +167,6 @@ bash scripts/render_with_reused_media.sh \
 | `lipsync` | InfiniteTalk 唇形同步 | `temp/<run>/lip_synced_raw.mp4` |
 | `postprocess` | 拉伸/对齐/统一格式 | `temp/<run>/lip_synced.mp4` |
 | `render` | Remotion 合成 | `output/<run>.mp4` |
-
-强制重跑某个阶段：
-
-```bash
-FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
-```
-
-可用 `FORCE_*` 变量：`FORCE_SCRIPT`, `FORCE_TTS`, `FORCE_WHISPER`, `FORCE_SUBTITLES`, `FORCE_STORYBOARD`, `FORCE_VISUALS`, `FORCE_LIPSYNC`, `FORCE_POSTPROCESS`, `FORCE_RENDER`。
 
 ---
 
@@ -176,10 +229,13 @@ bash /root/aigc_apps/start.sh
 
 ## 故障排查
 
-- **字幕与音频对不上**：检查 `script.txt` 是否与 `audio.wav` 对应。复用媒体时务必使用 `render_with_reused_media.sh`，它会自动复用源口播稿。
-- **字幕校准失败（match ratio < 65%）**：`script.txt` 与音频内容不一致。重新生成 TTS 或复用正确的源口播稿。
-- **ComfyUI 启动报 numpy/opencv 错误**：在服务器执行 `pip install "numpy<2.2" "opencv-python>=4.10"`。
-- **SSH 连接失败**：确保本地 `~/.ssh/config` 已配置免密登录，并运行 `bash scripts/detect_paths.sh`。
+| 问题 | 解决方案 |
+|------|----------|
+| 字幕与音频对不上 | 检查 `script.txt` 是否与 `audio.wav` 对应。复用媒体时务必使用 `render_with_reused_media.sh`。 |
+| 字幕校准失败（match ratio < 65%） | `script.txt` 与音频内容不一致。重新生成 TTS 或复用正确的源口播稿。 |
+| ComfyUI 启动报 numpy/opencv 错误 | 在服务器执行 `pip install "numpy<2.2" "opencv-python>=4.10"`。 |
+| SSH 连接失败 | 确保本地 `~/.ssh/config` 已配置免密登录，并运行 `bash scripts/detect_paths.sh`。 |
+| 阶段失败后重跑 | 直接重新执行原命令，流水线会自动从失败阶段继续。 |
 
 ---
 
@@ -188,11 +244,11 @@ bash /root/aigc_apps/start.sh
 本地组件开发：
 
 ```bash
-npm run dev        # Remotion preview
+npm run dev        # Remotion 预览
 npm run build      # TypeScript 检查
 ```
 
-渲染指定视频：
+渲染指定视频（高级）：
 
 ```bash
 npx remotion render src/index.tsx TalkingHeadVideo \

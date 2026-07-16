@@ -48,8 +48,9 @@ done
 : "${OUTPUT:?--output required}"
 : "${WORK_DIR:?--work-dir required}"
 
-# Resolve paths relative to project dir
-resolve() { realpath --relative-to="$PROJECT_DIR" "$(realpath "$1")"; }
+# Resolve paths relative to project dir (portable: works on macOS and Linux).
+set +H
+resolve() { python3 -c "import os,sys; print(os.path.relpath(os.path.realpath(sys.argv[1]), os.path.realpath(sys.argv[2])))" "$1" "$PROJECT_DIR"; }
 CONFIG="$(resolve "$CONFIG")"
 PROFILE="$(resolve "$PROFILE")"
 WORKFLOW="$(resolve "$WORKFLOW")"
@@ -60,8 +61,8 @@ WORK_DIR="$(resolve "$WORK_DIR")"
 
 # Read primary server from config
 HOST=$(jq -r '.primary.host // empty' "$CONFIG")
-PORT=$(jq -r '.primary.port // 22' "$CONFIG")
-USER=$(jq -r '.primary.user // root' "$CONFIG")
+PORT=$(jq -r '.primary.port // "22"' "$CONFIG")
+USER=$(jq -r '.primary.user // "root"' "$CONFIG")
 if [[ -z "$HOST" || "$HOST" == "null" ]]; then
   echo "❌ config/servers.json primary.host missing" >&2
   exit 1
@@ -109,17 +110,30 @@ rsync -avz -e "$RSYNC_SSH" \
   "$USER@$HOST:$REMOTE_DIR/$WORK_DIR/"
 
 echo "🎬 在服务器上启动生成（无 SSH 隧道）..."
-run_remote "cd $REMOTE_DIR && source /root/aigc_apps/InfiniteTalk/venv/bin/activate && \
-  nohup env PYTHONUNBUFFERED=1 python scripts/comfyui/generate_segments.py \
-    --config $CONFIG \
-    --profile $PROFILE \
-    --workflow $WORKFLOW \
-    --image $WORK_DIR/$(basename \"$IMAGE\") \
-    --audio $WORK_DIR/$(basename \"$AUDIO\") \
-    --output $WORK_DIR/$(basename \"$OUTPUT\") \
-    --work-dir $WORK_DIR \
-    --resume \
-    > $REMOTE_LOG 2>&1 & echo \$!"
+REMOTE_RUNNER="$REMOTE_DIR/runner.sh"
+# Write a runner script on the remote side to avoid local quoting/escaping issues.
+run_remote "cat > $REMOTE_RUNNER << 'REMOTE_EOF'
+#!/bin/bash
+set +u
+cd $REMOTE_DIR
+source /root/aigc_apps/InfiniteTalk/venv/bin/activate
+IMAGE_BASENAME=\$(basename $IMAGE)
+AUDIO_BASENAME=\$(basename $AUDIO)
+OUTPUT_BASENAME=\$(basename $OUTPUT)
+nohup env PYTHONUNBUFFERED=1 python scripts/comfyui/generate_segments.py \
+  --config $CONFIG \
+  --profile $PROFILE \
+  --workflow $WORKFLOW \
+  --image $WORK_DIR/\$IMAGE_BASENAME \
+  --audio $WORK_DIR/\$AUDIO_BASENAME \
+  --output $WORK_DIR/\$OUTPUT_BASENAME \
+  --work-dir $WORK_DIR \
+  --resume \
+  > $REMOTE_LOG 2>&1 &
+echo \$!
+REMOTE_EOF
+chmod +x $REMOTE_RUNNER
+bash $REMOTE_RUNNER"
 
 # Wait for remote process to start and log file to appear
 for i in {1..30}; do
@@ -130,13 +144,46 @@ for i in {1..30}; do
 done
 
 echo "⏳ 等待服务器生成完成..."
+GPU_ZERO_STREAK=0
+MAX_GPU_ZERO_STREAK=3
+CHECK_COUNT=0
 while true; do
-  TAIL=$(run_remote "tail -n 20 $REMOTE_LOG 2>/dev/null || true")
+  TAIL=$(run_remote "tail -n 30 $REMOTE_LOG 2>/dev/null || true")
   if echo "$TAIL" | grep -qE '\[Done\]|\[Cleanup\]|RuntimeError|Traceback|ERROR'; then
     break
   fi
+
+  # Probe GPU utilization and memory to distinguish "busy" from "dead".
+  GPU_INFO=$(run_remote "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader 2>/dev/null || echo 'n/a, n/a, n/a'")
+  GPU_UTIL=$(echo "$GPU_INFO" | cut -d',' -f1 | tr -d ' %')
+  GPU_MEM=$(echo "$GPU_INFO" | cut -d',' -f2 | tr -d ' ')
+  GPU_MEM_TOTAL=$(echo "$GPU_INFO" | cut -d',' -f3 | tr -d ' ')
+
+  # Show latest log line (most informative) and progress metrics.
+  LATEST_LOG_LINE=$(echo "$TAIL" | grep -v '^$' | tail -n 1)
   REMOTE_SIZE=$(run_remote "ls -lh $REMOTE_DIR/$OUTPUT 2>/dev/null | awk '{print \$5}' || echo n/a")
-  echo "$(date '+%H:%M:%S') 服务器输出: $REMOTE_SIZE"
+  SEG_COUNT=$(run_remote "ls $REMOTE_DIR/$WORK_DIR/lip_synced_raw_seg*.mp4 2>/dev/null | wc -l")
+  echo "$(date '+%H:%M:%S') GPU=${GPU_UTIL}% MEM=${GPU_MEM}/${GPU_MEM_TOTAL} SEGS=${SEG_COUNT} SIZE=${REMOTE_SIZE} LOG: ${LATEST_LOG_LINE:-(no new log)}"
+
+  # Stall detection: if GPU reads 0% for several consecutive checks while the
+  # process still exists, the job may have hung or crashed silently.
+  if [[ "$GPU_UTIL" =~ ^[0-9]+$ && "$GPU_UTIL" -eq 0 ]]; then
+    GPU_ZERO_STREAK=$((GPU_ZERO_STREAK + 1))
+    if [[ "$GPU_ZERO_STREAK" -ge "$MAX_GPU_ZERO_STREAK" ]]; then
+      PID_ALIVE=$(run_remote "pgrep -f 'generate_segments.py.*$RUN_ID' >/dev/null && echo yes || echo no")
+      if [[ "$PID_ALIVE" == "yes" ]]; then
+        echo "⚠️  GPU utilization has been 0% for ${MAX_GPU_ZERO_STREAK} consecutive checks; process is still alive but may be stalled." >&2
+      else
+        echo "❌ GPU utilization has been 0% for ${MAX_GPU_ZERO_STREAK} consecutive checks and the generator process is gone." >&2
+        run_remote "tail -n 120 $REMOTE_LOG" >&2
+        exit 1
+      fi
+    fi
+  else
+    GPU_ZERO_STREAK=0
+  fi
+
+  CHECK_COUNT=$((CHECK_COUNT + 1))
   sleep 60
 done
 
