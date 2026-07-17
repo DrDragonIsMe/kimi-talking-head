@@ -183,7 +183,7 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 - `video_layout.mode`：`portrait-hybrid`
 - `video_layout.hybrid.preset`：`default | host-focus | visual-focus | minimal | balanced`
 - `title_card.title` / `title_card.duration_seconds`
-- `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）
+- `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）
 - `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
 - `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
 - `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）

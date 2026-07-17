@@ -1,4 +1,4 @@
-export type WordRevealMode = 'none' | 'pop' | 'wipe';
+export type WordRevealMode = 'none' | 'pop' | 'wipe' | 'burn';
 export type HeroEntrance = 'pop' | 'wipe-up';
 
 export interface CaptionDnaColors {
@@ -19,6 +19,8 @@ export interface CaptionDnaMotion {
   fromScale: number;
   /** 入场起始纵向位移 px */
   fromY: number;
+  /** 入场起始横向位移 px（editorial 的 x-glide 用） */
+  fromX: number;
   /** 当前词放大倍数 */
   currentScale: number;
   /** 当前词辉光强度 0-1 */
@@ -40,6 +42,10 @@ export interface CaptionDnaHero {
   breathe: number;
   /** hero 辉光强度 0-1 */
   glow: number;
+  /** pop 入场起始缩放 */
+  fromScale: number;
+  /** 入场起始纵向位移 px（rise 式入场用） */
+  fromY: number;
 }
 
 export interface CaptionDna {
@@ -49,6 +55,8 @@ export interface CaptionDna {
   fontFamily: string;
   fontWeight: number;
   heroFontWeight: number;
+  /** hero 字体风格（如 editorial 的 italic） */
+  heroFontStyle?: string;
   colors: CaptionDnaColors;
   motion: CaptionDnaMotion;
   hero: CaptionDnaHero;

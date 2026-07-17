@@ -25,6 +25,7 @@ export const KEYNOTE_DNA: CaptionDna = {
     wordInSeconds: 0.3,
     fromScale: 1,
     fromY: 0,
+    fromX: 0,
     currentScale: 1.06,
     currentGlow: 0,
   },
@@ -38,5 +39,7 @@ export const KEYNOTE_DNA: CaptionDna = {
     scrimOpacity: 0.55,
     breathe: 0,
     glow: 0,
+    fromScale: 1,
+    fromY: 48,
   },
 };

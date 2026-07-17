@@ -116,6 +116,7 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
               const entranceScale = motion.fromScale + (1 - motion.fromScale) * progress;
               const scale = entranceScale * (isCurrent ? motion.currentScale : 1);
               const translateY = (1 - progress) * motion.fromY;
+              const translateX = (1 - progress) * motion.fromX;
 
               return (
                 <span
@@ -128,7 +129,7 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
                     margin: '0 0.14em',
                     color: isCurrent ? colors.accent : colors.text,
                     opacity: progress,
-                    transform: `translateY(${translateY}px) scale(${scale})`,
+                    transform: `translate(${translateX}px, ${translateY}px) scale(${scale})`,
                     transformOrigin: 'center bottom',
                     clipPath:
                       dna.wordReveal === 'wipe'
@@ -183,8 +184,9 @@ const HeroText: React.FC<{
   let clipPath: string | undefined;
 
   if (heroDna.entrance === 'pop') {
-    const scale = 1.6 + (1 - 1.6) * progress;
-    transform = `scale(${scale})`;
+    const scale = heroDna.fromScale + (1 - heroDna.fromScale) * progress;
+    const riseY = (1 - progress) * heroDna.fromY;
+    transform = `scale(${scale}) translateY(${riseY}px)`;
   } else {
     // wipe-up：clip-path 揭示 + 轻微上移，缩放通道留给呼吸
     clipPath = `inset(${(1 - progress) * 100}% 0 0 0)`;
@@ -204,6 +206,7 @@ const HeroText: React.FC<{
       style={{
         fontFamily: dna.fontFamily,
         fontWeight: dna.heroFontWeight,
+        fontStyle: dna.heroFontStyle ?? 'normal',
         fontSize: heroDna.fontSize,
         lineHeight: 1.2,
         letterSpacing: 2,

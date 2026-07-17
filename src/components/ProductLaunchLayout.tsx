@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
 import { AbsoluteFill, OffthreadVideo, staticFile, useCurrentFrame, useVideoConfig, interpolate, Easing } from 'remotion';
 import { DynamicTypingSubtitles } from './DynamicTypingSubtitles';
+import { KaraokeSubtitles } from './KaraokeSubtitles';
 import { NumberedCards } from './NumberedCards';
 import type { ThemeConfig } from '../themes';
-import type { SceneVisual } from '../index';
-import type { SubtitleCue } from '../hooks/useSubtitles';
+import type { ContentOverlayConfig, SceneVisual } from '../index';
+import type { SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
+import { getCaptionDna } from '../themes/captions';
 import { matchSceneStyle } from '../utils/keywordMatcher';
 
 interface ProductLaunchLayoutProps {
@@ -17,6 +19,8 @@ interface ProductLaunchLayoutProps {
   theme: ThemeConfig;
   primaryColor: string;
   secondaryColor: string;
+  contentOverlay?: ContentOverlayConfig;
+  heroMoments?: HeroMoment[];
 }
 
 const PRODUCT_KEYWORDS = [
@@ -39,6 +43,8 @@ export const ProductLaunchLayout: React.FC<ProductLaunchLayoutProps> = ({
   features,
   theme,
   primaryColor,
+  contentOverlay,
+  heroMoments = [],
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -173,12 +179,33 @@ export const ProductLaunchLayout: React.FC<ProductLaunchLayoutProps> = ({
         />
       )}
 
-      {/* 动态逐字字幕 */}
-      <DynamicTypingSubtitles
-        subtitles={subtitles}
-        theme={theme}
-        bottomOffset={isProductScene ? 120 : 160}
-      />
+      {/* 字幕：非 classic DNA 且有词级数据时走 karaoke，否则保持打字机字幕 */}
+      {(() => {
+        const dna = getCaptionDna(contentOverlay?.subtitles?.dna);
+        if (dna.wordReveal !== 'none') {
+          const activeHero =
+            heroMoments.find(
+              (h) => currentTime >= h.start - 0.2 && currentTime <= h.end + 1.8
+            ) ?? null;
+          if ((activeCue?.words?.length ?? 0) > 0 || activeHero) {
+            return (
+              <KaraokeSubtitles
+                cue={activeCue}
+                dna={dna}
+                hero={activeHero}
+                fontSize={contentOverlay?.subtitles?.fontSizeLarge ?? 58}
+              />
+            );
+          }
+        }
+        return (
+          <DynamicTypingSubtitles
+            subtitles={subtitles}
+            theme={theme}
+            bottomOffset={isProductScene ? 120 : 160}
+          />
+        );
+      })()}
 
       {/* 顶部品牌标签 */}
       <div

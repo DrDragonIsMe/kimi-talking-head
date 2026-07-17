@@ -210,6 +210,15 @@ test('sanitizeHeroPhrase: 只接受 narration 内的 2-6 字短语', () => {
   assert.strictEqual(sanitizeHeroPhrase(' 三个误区 ', narration), '三个误区');
 });
 
+test('sanitizeHeroPhrase: 拒绝跨词残片（虚词开头/结尾）', () => {
+  const narration = '人工智能现在到底是怎么改变人力资源管理的，真的落地了。';
+  assert.strictEqual(sanitizeHeroPhrase('的三', '治理的三'), null);
+  assert.strictEqual(sanitizeHeroPhrase('误区了', '三个误区了'), null);
+  assert.strictEqual(sanitizeHeroPhrase('是怎', narration), null);
+  assert.strictEqual(sanitizeHeroPhrase('真的落地', narration), '真的落地');
+  assert.strictEqual(sanitizeHeroPhrase('数字员工', '数字员工已经入职。'), '数字员工');
+});
+
 // ---------------------------------------------------------------------------
 
 console.log(`\n${passed} 通过, ${failed} 失败`);

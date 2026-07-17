@@ -138,8 +138,8 @@ if (props.sfxVolume !== undefined && (typeof props.sfxVolume !== 'number' || pro
 
 // ---- 字幕 DNA ----
 const dna = props.contentOverlay?.subtitles?.dna;
-if (dna !== undefined && !['classic', 'loud', 'keynote'].includes(dna)) {
-  fail(`contentOverlay.subtitles.dna 必须是 classic / loud / keynote 之一，当前: ${dna}`);
+if (dna !== undefined && !['classic', 'loud', 'keynote', 'cream', 'editorial', 'documentary'].includes(dna)) {
+  fail(`contentOverlay.subtitles.dna 必须是 classic / loud / keynote / cream / editorial / documentary 之一，当前: ${dna}`);
 }
 
 // ---- 输出 ----

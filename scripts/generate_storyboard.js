@@ -237,12 +237,17 @@ function buildFallbackShots(rawShots, cfg) {
   }));
 }
 
-// hero_phrase 必须是 narration 的精确子串且 2-6 字，否则视为 null（LLM 输出不可信，严格校验）。
+// hero_phrase 必须是 narration 的精确子串、2-6 字、且读起来是完整语义单元
+// （不是跨词残片），否则视为 null（LLM 输出不可信，严格校验）。
+const HERO_BAD_LEADING = /^[的了是在把被将和与或及就又都也才]/;
+const HERO_BAD_TRAILING = /[的了和与或及把被是在]$/;
+
 function sanitizeHeroPhrase(value, narration) {
   if (typeof value !== 'string') return null;
   const phrase = value.replace(/\s+/g, '');
   const length = Array.from(phrase).length;
   if (length < 2 || length > 6) return null;
+  if (HERO_BAD_LEADING.test(phrase) || HERO_BAD_TRAILING.test(phrase)) return null;
   if (!narration || !narration.replace(/\s+/g, '').includes(phrase)) return null;
   return phrase;
 }
@@ -277,7 +282,7 @@ Rules:
 6. visual_prompt must be a detailed but concise English prompt suitable for AI image generation or stock-photo search (under 40 words). No text, no watermark, no logo, no UI screenshot.
 7. Each visual should directly reflect the narration content, not generic business imagery.
 8. Keep Chinese fields brief to avoid truncation.
-9. hero_phrase: optionally pick ONE payoff phrase (2-4 Chinese characters, or a short Latin/number term) from this shot's narration that deserves a full-screen emphasis moment. Pick the conclusion or the surprising claim, NOT the topic word. It must be an exact substring of the narration. Use null when nothing earns the emphasis — most shots should be null.
+9. hero_phrase: optionally pick ONE payoff phrase (2-4 Chinese characters, or a short Latin/number term) from this shot's narration that deserves a full-screen emphasis moment. Pick the conclusion or the surprising claim, NOT the topic word. It must be an exact substring of the narration AND a complete semantic unit that reads well standalone — never a fragment crossing word boundaries. Good examples: 数字员工, 真的落地, 万能工具, 三个误区. Bad examples (fragments, will be rejected): 狠剧变, 的三, 个误, 误区了. Use null when nothing earns the emphasis — most shots should be null.
 
 Output strictly as a JSON array of objects in the same order as the input shots, with these exact fields:
 id, start, end, duration, narration, shot_type, subject, setting, camera, lighting, description, visual_prompt, style, transition_from_prev, hero_phrase

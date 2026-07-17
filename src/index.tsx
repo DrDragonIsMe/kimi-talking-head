@@ -397,6 +397,8 @@ const TalkingHeadVideo: React.FC<{
               theme={theme}
               primaryColor={primaryColor}
               secondaryColor={secondaryColor}
+              contentOverlay={contentOverlay}
+              heroMoments={heroMoments}
             />
           ) : isHybrid ? (
             <PortraitHybridLayout

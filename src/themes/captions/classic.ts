@@ -24,6 +24,7 @@ export const CLASSIC_DNA: CaptionDna = {
     wordInSeconds: 0,
     fromScale: 1,
     fromY: 0,
+    fromX: 0,
     currentScale: 1,
     currentGlow: 0,
   },
@@ -37,5 +38,7 @@ export const CLASSIC_DNA: CaptionDna = {
     scrimOpacity: 0.4,
     breathe: 0,
     glow: 0,
+    fromScale: 1.2,
+    fromY: 0,
   },
 };

@@ -25,6 +25,7 @@ export const LOUD_DNA: CaptionDna = {
     wordInSeconds: 0.16,
     fromScale: 1.3,
     fromY: 16,
+    fromX: 0,
     currentScale: 1.15,
     currentGlow: 0.6,
   },
@@ -38,5 +39,7 @@ export const LOUD_DNA: CaptionDna = {
     scrimOpacity: 0.5,
     breathe: 0.025,
     glow: 0.5,
+    fromScale: 1.6,
+    fromY: 0,
   },
 };
