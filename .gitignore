@@ -26,6 +26,8 @@ public/props.json
 public/scene_visuals/
 public/bgm.*
 public/sfx/
+api/jobs/
+api/uploads/
 
 # Host video templates (large binary assets, keep photo sources in git)
 assets/host/*.mp4

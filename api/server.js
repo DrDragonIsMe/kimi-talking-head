@@ -17,8 +17,24 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
-const upload = multer({ dest: UPLOAD_DIR });
+// 口播文章为纯文本，5MB 足够；限制单文件且只接受 .md/.txt，防磁盘 DoS
+const upload = multer({
+  dest: UPLOAD_DIR,
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const name = (file.originalname || '').toLowerCase();
+    if (name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt')) {
+      cb(null, true);
+    } else {
+      cb(new Error('只接受 .md / .txt 文章文件'));
+    }
+  },
+});
 const DEFAULT_PROFILE_PATH = path.join(PROJECT_ROOT, 'config', 'host_profile.json');
+
+// jobId 由 createJob 用 randomUUID 生成；校验格式，防路径穿越出 api/jobs/
+const JOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidJobId = (id) => JOB_ID_RE.test(id);
 
 // Simple concurrency semaphore for heavy video pipeline.
 class Semaphore {
@@ -236,6 +252,7 @@ app.get('/api/v1/jobs', (req, res) => {
 
 // Get job status
 app.get('/api/v1/jobs/:id', (req, res) => {
+  if (!isValidJobId(req.params.id)) return res.status(400).json({ error: 'Invalid job id' });
   const job = getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   res.json(serializeJob(job, true));
@@ -243,6 +260,7 @@ app.get('/api/v1/jobs/:id', (req, res) => {
 
 // Stream logs
 app.get('/api/v1/jobs/:id/logs/:type', (req, res) => {
+  if (!isValidJobId(req.params.id)) return res.status(400).json({ error: 'Invalid job id' });
   const job = getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -262,6 +280,7 @@ app.get('/api/v1/jobs/:id/logs/:type', (req, res) => {
 
 // Download outputs
 app.get('/api/v1/jobs/:id/download/:file', (req, res) => {
+  if (!isValidJobId(req.params.id)) return res.status(400).json({ error: 'Invalid job id' });
   const job = getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -281,6 +300,13 @@ app.get('/api/v1/jobs/:id/download/:file', (req, res) => {
 
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.sendFile(filePath);
+});
+
+// multer 错误（文件超限/类型不符）统一返回 4xx 而不是 500
+app.use((err, _req, res, _next) => {
+  if (!err) return res.status(500).json({ error: 'Internal error' });
+  const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+  res.status(status).json({ error: err.message });
 });
 
 const server = app.listen(PORT, () => {

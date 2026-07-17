@@ -1,0 +1,31 @@
+# 防止把密钥、依赖与产物打进镜像
+.git
+node_modules
+npm-debug.log
+
+# 密钥与本地配置（运行时通过 env_file / volume 注入）
+.env
+.env.*
+!.env.example
+config/host_profile.json
+config/servers.json
+
+# 生成物与中间产物
+temp
+output
+out
+public/audio.wav
+public/host_video.mp4
+public/subtitles.json
+public/subtitles.srt
+public/props.json
+public/scene_visuals
+public/bgm.*
+public/sfx
+api/jobs
+api/uploads
+.playwright-mcp
+
+# 本机系统垃圾
+.DS_Store
+**/.DS_Store
