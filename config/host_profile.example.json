@@ -81,6 +81,7 @@
       "fontSizeMedium": 48,
       "fontSizeSmall": 40,
       "headlineLabel": "零距离用薪灵",
+      "dna": "classic",
       "segmentation": {
         "maxSegmentSeconds": 3.2,
         "minSegmentSeconds": 0.9,

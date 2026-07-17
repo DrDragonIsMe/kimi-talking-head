@@ -14,6 +14,7 @@
 - **声音克隆**：基于 [IndexTTS2](https://github.com/index-tts/index-tts)，使用参考音频克隆主播声音。
 - **唇形同步**：基于 [InfiniteTalk](https://github.com/MeiGen-AI/InfiniteTalk) 将主播照片与音频合成口型匹配视频。
 - **工程级字幕**：Whisper 词级时间戳 + 口播稿字符级对齐，字幕内容严格等于原文，且自动校验稿音一致性。
+- **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote` 三套字幕 DNA 可选。
 - **竖屏分镜布局**：`portrait-hybrid` 模式支持 `default / host-focus / visual-focus / minimal / balanced` 五种预设。
 - **动态视觉**：根据内容自动切换场景背景、关键词高亮、章节面包屑、观点 bullets、品牌结尾卡。
 - **标题卡 + 封面图**：首帧 2 秒标题卡，同时输出 1080×1920 封面 PNG。
@@ -180,6 +181,7 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 - `video_layout.mode`：`portrait-hybrid`
 - `video_layout.hybrid.preset`：`default | host-focus | visual-focus | minimal | balanced`
 - `title_card.title` / `title_card.duration_seconds`
+- `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）
 - `product.*`：品牌文案、 pills、颜色
 
 ### `config/servers.json`

@@ -419,11 +419,12 @@ def build_cues(
     script_chars: List[str],
     times: List[float],
     config: dict,
-) -> List[Cue]:
+) -> Tuple[List[Cue], List[dict]]:
     units = segment_script(script_chars, times, config)
 
     cues: List[Cue] = []
-    for i, (s_idx, e_idx, chars) in enumerate(units, 1):
+    word_cues: List[dict] = []
+    for s_idx, e_idx, chars in units:
         text = "".join(chars).strip()
         if not text:
             continue
@@ -432,13 +433,102 @@ def build_cues(
         text = re.sub(r" ([，。、：；！？])", r"\1", text)
         cues.append(
             Cue(
-                index=i,
+                index=len(cues) + 1,
                 start=fmt_time(times[s_idx]),
                 end=fmt_time(times[e_idx]),
                 text=text,
             )
         )
-    return cues
+        word_cues.append(
+            {
+                "index": len(word_cues) + 1,
+                "start": round(float(times[s_idx]), 3),
+                "end": round(float(times[e_idx]), 3),
+                "text": text,
+                "words": build_cue_words(chars, s_idx, e_idx, times),
+            }
+        )
+    return cues, word_cues
+
+
+# ---------------------------------------------------------------------------
+# Word-level (karaoke) tokenization
+# ---------------------------------------------------------------------------
+
+def is_latin_char(ch: str) -> bool:
+    return bool(re.match(r"[A-Za-z0-9]", ch))
+
+
+def is_cjk_char(ch: str) -> bool:
+    return "一" <= ch <= "鿿"
+
+
+def tokenize_chars(items: List[Tuple[str, int]]) -> List[List[Tuple[str, int]]]:
+    """Group (char, abs_idx) items into karaoke tokens.
+
+    Rules: latin/digit runs stay whole; CJK runs split into 2-char tokens
+    (a run of 3 stays whole, so no lone trailing char is produced); any
+    other character (punctuation, symbols) attaches to the previous token.
+    """
+    tokens: List[List[Tuple[str, int]]] = []
+    i = 0
+    n = len(items)
+    while i < n:
+        ch = items[i][0]
+        if is_latin_char(ch):
+            j = i
+            while j < n and is_latin_char(items[j][0]):
+                j += 1
+            tokens.append(items[i:j])
+            i = j
+        elif is_cjk_char(ch):
+            j = i
+            while j < n and is_cjk_char(items[j][0]):
+                j += 1
+            run = items[i:j]
+            k = 0
+            while k < len(run):
+                take = 3 if len(run) - k == 3 else 2
+                tokens.append(run[k : k + take])
+                k += take
+            i = j
+        else:
+            if tokens:
+                tokens[-1].append(items[i])
+            else:
+                tokens.append([items[i]])
+            i += 1
+    return tokens
+
+
+def build_cue_words(
+    chars: List[str],
+    s_idx: int,
+    e_idx: int,
+    times: List[float],
+) -> List[dict]:
+    """Build word-level tokens with timings for one cue."""
+    items = [(ch, s_idx + off) for off, ch in enumerate(chars) if not ch.isspace()]
+    tokens = tokenize_chars(items)
+
+    words: List[dict] = []
+    for pos, token in enumerate(tokens):
+        text = "".join(c for c, _ in token)
+        if not text:
+            continue
+        start = float(times[token[0][1]])
+        if pos + 1 < len(tokens):
+            end = float(times[tokens[pos + 1][0][1]])
+        else:
+            end = float(times[e_idx])
+        words.append(
+            {
+                "text": text,
+                "start": round(start, 3),
+                "end": round(max(end, start), 3),
+            }
+        )
+    return words
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +539,11 @@ def write_srt(path: str, cues: List[Cue]) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for cue in cues:
             f.write(f"{cue.index}\n{cue.start} --> {cue.end}\n{cue.text}\n\n")
+
+
+def write_words_json(path: str, word_cues: List[dict]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(word_cues, f, ensure_ascii=False, indent=2)
 
 
 def load_segmentation_config() -> dict:
@@ -466,11 +561,14 @@ import os  # noqa: E402
 
 
 def main():
-    if len(sys.argv) != 4:
-        print("Usage: align_subtitles.py <script.txt> <whisper.json|whisper.srt> <output.srt>")
+    if len(sys.argv) not in (4, 5):
+        print(
+            "Usage: align_subtitles.py <script.txt> <whisper.json|whisper.srt> <output.srt> [words.json]"
+        )
         sys.exit(1)
 
     script_path, whisper_path, srt_out = sys.argv[1:4]
+    words_out = sys.argv[4] if len(sys.argv) == 5 else None
 
     with open(script_path, "r", encoding="utf-8") as f:
         script_text = f.read().strip()
@@ -501,10 +599,14 @@ def main():
     all_times = fill_space_times(script_chars_all, script_mapping, non_space_times)
 
     config = load_segmentation_config()
-    cues = build_cues(script_chars_all, all_times, config)
+    cues, word_cues = build_cues(script_chars_all, all_times, config)
 
     write_srt(srt_out, cues)
     print(f"✅ Aligned {len(cues)} cues -> {srt_out}")
+
+    if words_out:
+        write_words_json(words_out, word_cues)
+        print(f"✅ Word-level timings -> {words_out}")
 
 
 if __name__ == "__main__":

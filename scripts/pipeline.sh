@@ -322,7 +322,8 @@ VISUALS_PUBLIC_DIR="$PROJECT_DIR/public/scene_visuals/$OUTPUT_NAME"
         if ! python3 "$PROJECT_DIR/scripts/align_subtitles.py" \
             "$WORK_DIR/script.txt" \
             "$RAW_INPUT" \
-            "$WORK_DIR/subtitles.srt"; then
+            "$WORK_DIR/subtitles.srt" \
+            "$WORK_DIR/subtitles_words.json"; then
             echo "❌ 字幕校准失败：口播稿与音频内容不一致。" >&2
             echo "   当复用旧音频时，必须同时复用对应口播稿（script.txt）。" >&2
             exit 1
@@ -583,6 +584,7 @@ CONTENT_OVERLAY_JSON=$(jq '
       fontSizeMedium: 48,
       fontSizeSmall: 40,
       headlineLabel: "零距离看懂财经",
+      dna: "classic",
       segmentation: {
         maxSegmentSeconds: 3.2,
         minSegmentSeconds: 0.9,
@@ -629,6 +631,19 @@ else
 fi
 CHAPTERS_JSON=$(cat "$CHAPTERS_JSON_PATH" 2>/dev/null || echo '[]')
 
+# hero 时刻定位（增强项，失败不阻断流水线）
+HERO_MOMENTS_JSON='[]'
+HERO_STORYBOARD_JSON="${STORYBOARD_JSON:-$WORK_DIR/storyboard.json}"
+if [ -s "$WORK_DIR/subtitles_words.json" ] && [ -s "$HERO_STORYBOARD_JSON" ]; then
+    if node "$PROJECT_DIR/scripts/locate_hero_moments.js" \
+        "$HERO_STORYBOARD_JSON" "$WORK_DIR/subtitles_words.json" \
+        "$WORK_DIR/hero_moments.json" "0"; then
+        HERO_MOMENTS_JSON=$(cat "$WORK_DIR/hero_moments.json" 2>/dev/null || echo '[]')
+    else
+        echo "⚠️  hero 时刻定位失败，按无 hero 继续"
+    fi
+fi
+
 echo "🎬 标题卡: $VIDEO_TITLE"
 [ -n "$VIDEO_SUBTITLE" ] && echo "📝 副标题: $VIDEO_SUBTITLE"
 echo ""
@@ -638,8 +653,10 @@ cp "$WORK_DIR/lip_synced.mp4" "$PROJECT_DIR/public/host_video.mp4"
 cp "$WORK_DIR/audio.wav" "$PROJECT_DIR/public/audio.wav"
 cp "$WORK_DIR/subtitles.srt" "$PROJECT_DIR/public/subtitles.srt"
 
+# 注意：字幕/词级/hero 时间都不加标题卡偏移——字幕组件在 <Sequence> 内
+# 使用相对时间轴（0 = 音频起点），加偏移会导致字幕比语音慢 TITLE_CARD_SEC 秒。
 SUBTITLE_SEGMENTATION_JSON="$SUBTITLE_SEGMENTATION_JSON" \
-  node "$PROJECT_DIR/scripts/parse_srt.js" "$WORK_DIR/subtitles.srt" "$PROJECT_DIR/public/subtitles.json" "$TITLE_CARD_SEC"
+  node "$PROJECT_DIR/scripts/parse_srt.js" "$WORK_DIR/subtitles.srt" "$PROJECT_DIR/public/subtitles.json" "0" "$WORK_DIR/subtitles_words.json"
 SUBTITLE_SEGMENTATION_JSON="$SUBTITLE_SEGMENTATION_JSON" \
   node "$PROJECT_DIR/scripts/validate_subtitles.js" "$PROJECT_DIR/public/subtitles.json"
 SUBTITLES_JSON=$(cat "$PROJECT_DIR/public/subtitles.json")
@@ -666,6 +683,7 @@ cat > "$PROJECT_DIR/public/props.json" << EOF
   "chapters": $CHAPTERS_JSON,
   "dataBars": $DATA_BARS_JSON,
   "quoteHighlight": $QUOTE_HIGHLIGHT_JSON,
+  "heroMoments": $HERO_MOMENTS_JSON,
   "contentOverlay": $CONTENT_OVERLAY_JSON,
   "videoLayout": $VIDEO_LAYOUT_WITH_TEMPLATE,
   "template": "$TEMPLATE",

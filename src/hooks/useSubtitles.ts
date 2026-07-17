@@ -1,9 +1,22 @@
 import { useMemo } from 'react';
 
+export interface SubtitleWord {
+  text: string;
+  start: number;
+  end: number;
+}
+
+export interface HeroMoment {
+  start: number;
+  end: number;
+  text: string;
+}
+
 export interface SubtitleCue {
   start: number;
   end: number;
   text: string;
+  words?: SubtitleWord[];
 }
 
 interface SubtitleSegmentationConfig {

@@ -8,7 +8,9 @@
 
 - `scripts/pipeline.sh` — main orchestration, resumable via `temp/<run>/.pipeline_state.json`.
 - `scripts/render_with_reused_media.sh` — reuse existing audio/lip video for style/title-only changes.
-- `scripts/align_subtitles.py` — word-level Whisper JSON + script character-level alignment.
+- `scripts/align_subtitles.py` — word-level Whisper JSON + script character-level alignment; also emits `subtitles_words.json` (karaoke word timings).
+- `scripts/locate_hero_moments.js` — locates LLM-picked `hero_phrase` (storyboard) in word timings → `hero_moments.json`.
+- `src/themes/captions/` — caption DNA registry (`classic` / `loud` / `keynote`); selected via `content_overlay.subtitles.dna`.
 - `config/host_profile.json` — host photo, voice reference, template, layout preset, brand copy.
 - `config/servers.json` — SSH + GPU server paths, updated by `scripts/detect_paths.sh`.
 - `server/` — GPU server deployment scripts and model checklist.

@@ -21,7 +21,7 @@ const outputJsonPath = process.argv[3];
 const configPath = process.argv[4] || path.join(path.resolve(__dirname, '..'), 'config', 'host_profile.json');
 const videoTitle = process.argv[5] || '';
 
-if (!srtPath || !outputJsonPath) {
+if (require.main === module && (!srtPath || !outputJsonPath)) {
   console.error('Usage: node generate_storyboard.js <subtitles.srt> <output.json> [config-path] [video-title]');
   process.exit(1);
 }
@@ -237,6 +237,16 @@ function buildFallbackShots(rawShots, cfg) {
   }));
 }
 
+// hero_phrase 必须是 narration 的精确子串且 2-6 字，否则视为 null（LLM 输出不可信，严格校验）。
+function sanitizeHeroPhrase(value, narration) {
+  if (typeof value !== 'string') return null;
+  const phrase = value.replace(/\s+/g, '');
+  const length = Array.from(phrase).length;
+  if (length < 2 || length > 6) return null;
+  if (!narration || !narration.replace(/\s+/g, '').includes(phrase)) return null;
+  return phrase;
+}
+
 async function enrichShotsWithLLM(rawShots, title, cfg) {
   if (!kimiClient.isConfigured() || !cfg.llm.enabled) {
     console.log('🤖 LLM 未配置或已禁用，使用默认分镜');
@@ -267,9 +277,10 @@ Rules:
 6. visual_prompt must be a detailed but concise English prompt suitable for AI image generation or stock-photo search (under 40 words). No text, no watermark, no logo, no UI screenshot.
 7. Each visual should directly reflect the narration content, not generic business imagery.
 8. Keep Chinese fields brief to avoid truncation.
+9. hero_phrase: optionally pick ONE payoff phrase (2-4 Chinese characters, or a short Latin/number term) from this shot's narration that deserves a full-screen emphasis moment. Pick the conclusion or the surprising claim, NOT the topic word. It must be an exact substring of the narration. Use null when nothing earns the emphasis — most shots should be null.
 
 Output strictly as a JSON array of objects in the same order as the input shots, with these exact fields:
-id, start, end, duration, narration, shot_type, subject, setting, camera, lighting, description, visual_prompt, style, transition_from_prev
+id, start, end, duration, narration, shot_type, subject, setting, camera, lighting, description, visual_prompt, style, transition_from_prev, hero_phrase
 
 Video title: ${title || 'business insight'}
 
@@ -313,6 +324,7 @@ ${JSON.stringify(rawShots, null, 2)}`;
           visual_prompt: (llm.visual_prompt || '').trim() || `Professional Chinese business host, clean studio, soft light, no text`,
           style: cfg.styles.includes(llm.style) ? llm.style : cfg.styles[0],
           transition_from_prev: idx === 0 ? 'open' : (cfg.transitions.includes(llm.transition_from_prev) ? llm.transition_from_prev : cfg.transitions[0]),
+          hero_phrase: sanitizeHeroPhrase(llm.hero_phrase, raw.narration),
         };
       });
 
@@ -359,7 +371,11 @@ const main = async () => {
   console.log(`🎬 分镜脚本已保存: ${outputJsonPath}`);
 };
 
-main().catch((err) => {
-  console.error('❌ 分镜生成失败:', err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('❌ 分镜生成失败:', err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { sanitizeHeroPhrase };

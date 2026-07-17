@@ -6,7 +6,7 @@ import { TopicTag } from './TopicTag';
 import { BrandBadge } from './BrandBadge';
 import { HybridInsightCard } from './HybridInsightCard';
 import { FallingChapterCards } from './FallingChapterCards';
-import { SubtitleCue } from '../hooks/useSubtitles';
+import { SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
 import type { ContentOverlayConfig, SceneVisual } from '../index';
 
 interface PortraitHybridLayoutProps {
@@ -22,6 +22,7 @@ interface PortraitHybridLayoutProps {
   tagline: string;
   title: string;
   chapters?: Array<{ start: number; end: number; title: string }>;
+  heroMoments?: HeroMoment[];
   hybridConfig?: {
     preset?: 'default' | 'host-focus' | 'visual-focus' | 'minimal' | 'balanced';
     mainVisualRatio?: number;
@@ -138,6 +139,7 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
   title,
   hybridConfig: rawHybridConfig = {},
   chapters = [],
+  heroMoments = [],
 }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -304,6 +306,7 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
             headlineLabel: '',
           }}
           variant="hybrid-bottom"
+          heroMoments={heroMoments}
         />
       ) : null}
     </AbsoluteFill>

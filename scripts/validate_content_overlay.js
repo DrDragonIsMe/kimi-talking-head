@@ -42,6 +42,9 @@ function validate() {
     const s = overlay.subtitles;
     if (typeof s.maxLines !== 'number') errors.push('subtitles.maxLines 必须是数字');
     if (typeof s.maxCharsPerLine !== 'number') errors.push('subtitles.maxCharsPerLine 必须是数字');
+    if (s.dna !== undefined && !['classic', 'loud', 'keynote'].includes(s.dna)) {
+      errors.push('subtitles.dna 必须是 classic / loud / keynote 之一');
+    }
     if (s.segmentation) {
       const seg = s.segmentation;
       if (typeof seg.maxSegmentSeconds !== 'number') errors.push('subtitles.segmentation.maxSegmentSeconds 必须是数字');

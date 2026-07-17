@@ -12,7 +12,7 @@ import { PortraitHybridLayout } from './components/PortraitHybridLayout';
 import { ProductLaunchLayout } from './components/ProductLaunchLayout';
 import type { Chapter } from './components/ProgressBreadcrumb';
 import { ContentInteractionPreview } from './components/ContentInteractionPreview';
-import { SubtitleCue } from './hooks/useSubtitles';
+import { SubtitleCue, HeroMoment } from './hooks/useSubtitles';
 import { DEFAULT_OVERLAY_LAYOUT_CONFIG, getActiveCueIndex, getOverlayLayoutPreset } from './utils/overlayLayout';
 import type { VideoTemplate } from './themes';
 import { getTheme } from './themes';
@@ -91,6 +91,8 @@ export interface ContentOverlayConfig {
     fontSizeMedium: number;
     fontSizeSmall: number;
     headlineLabel: string;
+    /** 字幕 DNA：classic（默认整句卡片）/ loud（逐词冲击）/ keynote（发布式揭示） */
+    dna?: string;
     segmentation: {
       maxSegmentSeconds: number;
       minSegmentSeconds: number;
@@ -215,6 +217,7 @@ export const RemotionRoot: React.FC = () => {
           dataBars: [],
           quoteHighlight: null,
           chapters: [],
+          heroMoments: [],
           contentOverlay: DEFAULT_CONTENT_OVERLAY,
           videoLayout: {
             mode: 'portrait-hybrid',
@@ -272,6 +275,7 @@ const TalkingHeadVideo: React.FC<{
   dataBars: DataBarItem[];
   quoteHighlight: QuoteHighlightData | null;
   chapters?: Chapter[];
+  heroMoments?: HeroMoment[];
   contentOverlay?: ContentOverlayConfig;
   videoLayout?: VideoLayoutConfig;
   template?: VideoTemplate;
@@ -299,6 +303,7 @@ const TalkingHeadVideo: React.FC<{
   dataBars,
   quoteHighlight,
   chapters,
+  heroMoments = [],
   contentOverlay = DEFAULT_CONTENT_OVERLAY,
   videoLayout = { mode: 'talking-head' },
   template = 'editorial',
@@ -368,6 +373,7 @@ const TalkingHeadVideo: React.FC<{
               tagline={tagline}
               title={title}
               chapters={chapters}
+              heroMoments={heroMoments}
               hybridConfig={videoLayout.hybrid}
             />
           ) : (

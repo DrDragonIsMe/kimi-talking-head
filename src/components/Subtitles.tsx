@@ -1,8 +1,10 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { useSubtitles, SubtitleCue } from '../hooks/useSubtitles';
+import { useSubtitles, SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
 import { matchSceneStyle, extractHighlightWords, formatSubtitleLines, normalizeDisplayText } from '../utils/keywordMatcher';
 import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
+import { getCaptionDna } from '../themes/captions';
+import { KaraokeSubtitles } from './KaraokeSubtitles';
 import type { ContentOverlayConfig } from '../index';
 
 const CREAM = '#FAFAF7';
@@ -15,9 +17,10 @@ interface SubtitlesProps {
   config: ContentOverlayConfig['subtitles'];
   layout?: OverlayLayoutConfig;
   variant?: 'default' | 'hybrid-bottom';
+  heroMoments?: HeroMoment[];
 }
 
-export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config, layout, variant = 'default' }) => {
+export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config, layout, variant = 'default', heroMoments }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
   const currentTime = frame / fps;
@@ -29,6 +32,23 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
   const currentCueIndex = getActiveCueIndex(loadedSubtitles, currentTime);
   const overlayLayout = getOverlayLayoutPreset(currentCueIndex, layout);
   const isHybridBottom = variant === 'hybrid-bottom';
+
+  // 词级 DNA：选了非 classic 且当前 cue 带词级时间戳（或有 hero 时刻）时走 karaoke 渲染
+  const dna = getCaptionDna(config.dna);
+  if (dna.wordReveal !== 'none') {
+    const activeHero =
+      heroMoments?.find((h) => currentTime >= h.start - 0.2 && currentTime <= h.end + 1.8) ?? null;
+    if ((currentCue?.words?.length ?? 0) > 0 || activeHero) {
+      return (
+        <KaraokeSubtitles
+          cue={currentCue ?? null}
+          dna={dna}
+          hero={activeHero}
+          fontSize={config.fontSizeLarge}
+        />
+      );
+    }
+  }
 
   if (!currentCue) return null;
 
