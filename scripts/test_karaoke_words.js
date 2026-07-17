@@ -91,6 +91,33 @@ test('align: 词级时间单调递增且在 cue 范围内', () => {
   }
 });
 
+test('align: 零时长标点词不产生 end<=start 的 cue（真实事故回归）', () => {
+  // 模拟 Whisper 给标点零时长：正文词 0.2s，逗号 start==end
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'karaoke-zero-'));
+  const scriptPath = path.join(dir, 'script.txt');
+  const whisperPath = path.join(dir, 'whisper.json');
+  const srtPath = path.join(dir, 'out.srt');
+  const wordsPath = path.join(dir, 'words.json');
+  fs.writeFileSync(scriptPath, '交叉学科门类，首批就有15个专业。');
+  const words = [];
+  let t = 0;
+  for (const ch of '交叉学科门类，首批就有15个专业。') {
+    const dur = ch === '，' ? 0 : 0.2;
+    words.push({ word: ch, start: t, end: t + dur });
+    t += 0.22;
+  }
+  fs.writeFileSync(whisperPath, JSON.stringify({ segments: [{ words }] }));
+  execFileSync('python3', [
+    path.join(__dirname, 'align_subtitles.py'),
+    scriptPath, whisperPath, srtPath, wordsPath,
+  ]);
+  const cues = JSON.parse(fs.readFileSync(wordsPath, 'utf8'));
+  assert.ok(cues.length > 0);
+  for (const cue of cues) {
+    assert.ok(cue.end > cue.start, `零时长 cue: ${cue.text} (${cue.start}-${cue.end})`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 2. parse_srt.js
 // ---------------------------------------------------------------------------

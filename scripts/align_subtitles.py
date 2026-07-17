@@ -422,6 +422,9 @@ def build_cues(
 ) -> Tuple[List[Cue], List[dict]]:
     units = segment_script(script_chars, times, config)
 
+    # cue 的最小时长：零时长 cue（如零时长标点词）会破坏下游校验与渲染
+    MIN_CUE_SECONDS = 0.04
+
     cues: List[Cue] = []
     word_cues: List[dict] = []
     for s_idx, e_idx, chars in units:
@@ -431,21 +434,25 @@ def build_cues(
         # Collapse multiple spaces and remove spaces before CJK punctuation
         text = re.sub(r"\s+", " ", text)
         text = re.sub(r" ([，。、：；！？])", r"\1", text)
+        start_t = float(times[s_idx])
+        end_t = float(times[e_idx])
+        if end_t <= start_t:
+            end_t = start_t + MIN_CUE_SECONDS
         cues.append(
             Cue(
                 index=len(cues) + 1,
-                start=fmt_time(times[s_idx]),
-                end=fmt_time(times[e_idx]),
+                start=fmt_time(start_t),
+                end=fmt_time(end_t),
                 text=text,
             )
         )
         word_cues.append(
             {
                 "index": len(word_cues) + 1,
-                "start": round(float(times[s_idx]), 3),
-                "end": round(float(times[e_idx]), 3),
+                "start": round(start_t, 3),
+                "end": round(end_t, 3),
                 "text": text,
-                "words": build_cue_words(chars, s_idx, e_idx, times),
+                "words": build_cue_words(chars, s_idx, e_idx, times, start_t, end_t),
             }
         )
     return cues, word_cues
@@ -506,8 +513,10 @@ def build_cue_words(
     s_idx: int,
     e_idx: int,
     times: List[float],
+    cue_start: float,
+    cue_end: float,
 ) -> List[dict]:
-    """Build word-level tokens with timings for one cue."""
+    """Build word-level tokens with timings for one cue, clamped to [cue_start, cue_end]."""
     items = [(ch, s_idx + off) for off, ch in enumerate(chars) if not ch.isspace()]
     tokens = tokenize_chars(items)
 
@@ -520,12 +529,14 @@ def build_cue_words(
         if pos + 1 < len(tokens):
             end = float(times[tokens[pos + 1][0][1]])
         else:
-            end = float(times[e_idx])
+            end = cue_end
+        start = min(max(start, cue_start), cue_end)
+        end = min(max(end, start), cue_end)
         words.append(
             {
                 "text": text,
                 "start": round(start, 3),
-                "end": round(max(end, start), 3),
+                "end": round(end, 3),
             }
         )
     return words
@@ -597,6 +608,12 @@ def main():
         sys.exit(2)
 
     all_times = fill_space_times(script_chars_all, script_mapping, non_space_times)
+
+    # Whisper 偶发时间戳回退/零时长（如标点词），强制时间轴单调不减，
+    # 保证下游每个 cue 都有 end >= start。
+    for i in range(1, len(all_times)):
+        if all_times[i] < all_times[i - 1]:
+            all_times[i] = all_times[i - 1]
 
     config = load_segmentation_config()
     cues, word_cues = build_cues(script_chars_all, all_times, config)
