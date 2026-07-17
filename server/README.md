@@ -32,6 +32,10 @@ bash install.sh
 7. Clone/refresh MuseTalk into `/root/aigc_apps/MuseTalk` (or a data disk if system disk is full) and install its Python 3.10 venv with PyTorch + MMLab dependencies.
 8. Copy `start.sh` / `env.sh` to `/root/aigc_apps/` and create standard symlinks.
 
+### 版本锁定（可选）
+
+`server/versions.env` 控制 install.sh 检出的依赖版本：各 `*_REF` 留空时跟随上游 HEAD（历史行为）；填入实测通过的 commit/tag 后，安装会检出该固定版本，避免上游 HEAD 漂移导致环境不可复现。建议新服务器验证通过后，把各仓库实际检出的 commit 回填到 `versions.env` 并提交。
+
 ## Download models
 
 Models are too large to bundle. See [`MODEL_CHECKLIST.md`](MODEL_CHECKLIST.md) for the exact file list and destinations.

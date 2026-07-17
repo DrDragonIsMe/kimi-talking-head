@@ -8,6 +8,7 @@
 
 - `scripts/pipeline.sh` — main orchestration, resumable via `temp/<run>/.pipeline_state.json`.
 - `scripts/render_with_reused_media.sh` — reuse existing audio/lip video for style/title-only changes.
+- `scripts/lib/remote_job.sh` — shared SSH/SCP options, conda env activation resolution, nohup remote job submit, and status polling (timeout + ssh-failure circuit breaker) used by `tts_index.sh` / `infinitetalk.sh` / `musetalk.sh`.
 - `scripts/align_subtitles.py` — word-level Whisper JSON + script character-level alignment; also emits `subtitles_words.json` (karaoke word timings).
 - `scripts/locate_hero_moments.js` — locates LLM-picked `hero_phrase` (storyboard) in word timings → `hero_moments.json`.
 - `src/themes/captions/` — caption DNA registry (`classic` / `loud` / `keynote`); selected via `content_overlay.subtitles.dna`.

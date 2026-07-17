@@ -29,6 +29,8 @@ Before any run, the pipeline validates:
 ## 4. GPU Server Operations
 
 - `server/install.sh` installs ComfyUI + InfiniteTalk, IndexTTS, and MuseTalk on a fresh GPU server.
+- `server/versions.env` pins dependency versions (`*_REF` + `TORCH_SPEC`); empty values track upstream HEAD. Backfill tested commits after a verified install to make reinstalls reproducible.
+- Remote job wrappers (`scripts/tts_index.sh`, `infinitetalk.sh`, `musetalk.sh`) share `scripts/lib/remote_job.sh`: unified SSH options (`BatchMode`, `ConnectTimeout`) and a circuit breaker — 5 consecutive SSH failures abort the phase instead of waiting out the full timeout.
 - `server/server_maintenance.md` contains day-to-day runbooks.
 - Model weights are documented in [`server/MODEL_CHECKLIST.md`](server/MODEL_CHECKLIST.md); they are loaded via symlinks and are never committed.
 - The local engine is selected in `config/host_profile.json` via `lipsync.engine` (`infinitetalk` or `musetalk`).

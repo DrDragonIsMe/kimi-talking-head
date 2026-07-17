@@ -41,8 +41,9 @@ fi
 
 # Storyboard drives scene visuals; if we force-regenerate the storyboard,
 # the downstream visuals are likely stale and should also be regenerated.
+# 必须 export：prepare_scene_visuals.js 通过 process.env.FORCE_VISUALS 读取该值。
 if [ "${FORCE_STORYBOARD:-0}" = "1" ]; then
-    FORCE_VISUALS=1
+    export FORCE_VISUALS=1
 fi
 
 mkdir -p "$TEMP_ROOT" "$WORK_DIR" "$OUTPUT_DIR"
@@ -523,7 +524,16 @@ SUBTITLES_VISUALS_PID=$!
 ) &
 LIPSYNC_PID=$!
 
-wait $SUBTITLES_VISUALS_PID $LIPSYNC_PID
+# 逐个 wait 并保留各自退出码：bash 的多 PID wait 只返回最后一个 PID 的状态，
+# 直接 wait A B 会吞掉子任务 A 的失败。
+SUBTITLES_VISUALS_EXIT=0
+LIPSYNC_EXIT=0
+wait $SUBTITLES_VISUALS_PID || SUBTITLES_VISUALS_EXIT=$?
+wait $LIPSYNC_PID || LIPSYNC_EXIT=$?
+if [ "$SUBTITLES_VISUALS_EXIT" -ne 0 ] || [ "$LIPSYNC_EXIT" -ne 0 ]; then
+    echo "❌ 并行子任务失败（字幕/画面子任务=$SUBTITLES_VISUALS_EXIT，唇形子任务=$LIPSYNC_EXIT）" >&2
+    exit 1
+fi
 
 if ! has_valid_srt "$WORK_DIR/subtitles.srt"; then
     echo "❌ 字幕生成失败: $WORK_DIR/subtitles.srt" >&2

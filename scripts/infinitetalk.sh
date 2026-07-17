@@ -1,13 +1,15 @@
 #!/bin/bash
 set -e
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/remote_job.sh"
+
 PHOTO_INPUT=$1
 AUDIO_INPUT=$2
 VIDEO_OUTPUT=$3
 CONFIG="config/servers.json"
 PROFILE="${PROFILE:-config/host_profile.json}"
 RUN_ID="${PIPELINE_RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
-SSH_OPTS="-o ServerAliveInterval=60 -o ServerAliveCountMax=7"
+SSH_OPTS="$REMOTE_JOB_SSH_OPTS"
 
 PHOTO_BASENAME=$(basename "$PHOTO_INPUT")
 AUDIO_BASENAME=$(basename "$AUDIO_INPUT")
@@ -51,6 +53,7 @@ HOST=$(echo "$SERVER_INFO" | cut -d: -f1)
 PORT=$(echo "$SERVER_INFO" | cut -d: -f2)
 USER=$(echo "$SERVER_INFO" | cut -d: -f3)
 WORKSPACE=$(echo "$SERVER_INFO" | cut -d: -f4)
+remote_job_init "$HOST" "$PORT" "$USER"
 
 bash scripts/upload_to_server.sh "$AUDIO_INPUT" "input/$AUDIO_BASENAME"
 
@@ -63,14 +66,7 @@ else
 fi
 
 # 激活 conda 环境时需要先 source conda.sh
-if echo "$INFINITE_VENV" | grep -qE "^source"; then
-    ACTIVATE_CMD="$INFINITE_VENV"
-elif [ -f "$INFINITE_VENV" ] || echo "$INFINITE_VENV" | grep -qE "^/"; then
-    ACTIVATE_CMD="source $INFINITE_VENV"
-else
-    # 视为 conda 环境名
-    ACTIVATE_CMD="source /root/miniconda3/etc/profile.d/conda.sh && conda activate $INFINITE_VENV"
-fi
+ACTIVATE_CMD=$(remote_job_activate_cmd "$INFINITE_VENV" "/root/miniconda3")
 
 echo "🎭 执行 InfiniteTalk 唇形同步..."
 echo "   使用路径: $INFINITE_PATH"
@@ -115,11 +111,7 @@ printf -v CMD_ARGS_Q '%q' "$CMD_ARGS"
 printf -v REMOTE_STATUS_Q '%q' "$REMOTE_STATUS"
 
 echo "🚀 通过 nohup 提交远端后台 InfiniteTalk 任务..."
-ssh -p $PORT $SSH_OPTS $USER@$HOST << EOF
-    set -e
-    mkdir -p "$WORKSPACE/output"
-    rm -f "$REMOTE_STATUS" "$REMOTE_PID" "$REMOTE_LOG" "$REMOTE_RUNNER"
-    cat > "$REMOTE_RUNNER" << 'REMOTE_RUNNER_EOF'
+REMOTE_PID_VALUE=$(remote_job_submit "$REMOTE_STATUS" "$REMOTE_PID" "$REMOTE_LOG" "$REMOTE_RUNNER" << EOF
 #!/bin/bash
 set -e
 ACTIVATE_CMD=$ACTIVATE_CMD_Q
@@ -133,88 +125,19 @@ fi
 export CUDA_HOME=/root/miniconda3/envs/multitalk
 cd "\$INFINITE_PATH"
 python generate_infinitetalk.py \$CMD_ARGS > >(tee -a "$REMOTE_LOG.stdout") 2> >(tee -a "$REMOTE_LOG.stderr" >&2)
-REMOTE_RUNNER_EOF
-    chmod +x "$REMOTE_RUNNER"
-    nohup bash "$REMOTE_RUNNER" > "$REMOTE_LOG" 2>&1 </dev/null &
-    echo \$! > "$REMOTE_PID"
 EOF
+)
 
-REMOTE_PID_VALUE=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "cat '$REMOTE_PID' 2>/dev/null || echo ''")
 if [ -z "$REMOTE_PID_VALUE" ]; then
     echo "❌ 远端 InfiniteTalk 任务未能启动" >&2
     exit 1
 fi
 echo "🧵 后台任务已启动，PID: $REMOTE_PID_VALUE"
 
-poll_count=0
-max_poll=$((MAX_POLL_MINUTES * 60 / POLL_INTERVAL))
-
-while true; do
-    poll_count=$((poll_count + 1))
-    if [ "$poll_count" -gt "$max_poll" ]; then
-        echo "❌ 远端 InfiniteTalk 任务超时（>${MAX_POLL_MINUTES}分钟），强制终止" >&2
-        ssh -p $PORT $SSH_OPTS $USER@$HOST "kill '$REMOTE_PID_VALUE' 2>/dev/null || true" || true
-        exit 1
-    fi
-
-    STATUS_OUTPUT=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "
-        set -e
-        if [ -f '$REMOTE_STATUS' ]; then
-            printf 'status=%s\n' \"\$(cat '$REMOTE_STATUS')\"
-        elif kill -0 '$REMOTE_PID_VALUE' 2>/dev/null; then
-            if [ -f '$REMOTE_OUTPUT' ]; then
-                SIZE=\$(wc -c < '$REMOTE_OUTPUT' 2>/dev/null || echo 0)
-                printf 'running size=%s\n' \"\$SIZE\"
-            else
-                printf 'running size=0\n'
-            fi
-        else
-            printf 'missing_status\n'
-        fi
-    " 2>/dev/null || echo "ssh_failed")
-
-    echo "⏳ InfiniteTalk 状态: $STATUS_OUTPUT"
-
-    case "$STATUS_OUTPUT" in
-        status=0*)
-            REMOTE_SUMMARY=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "
-                set -e
-                if [ ! -s '$REMOTE_OUTPUT' ]; then
-                    echo 'missing_output'
-                    exit 0
-                fi
-                SIZE=\$(wc -c < '$REMOTE_OUTPUT' 2>/dev/null || echo 0)
-                DURATION=\$(ffprobe -v error -show_entries format=duration -of csv=p=0 '$REMOTE_OUTPUT' 2>/dev/null || echo 0)
-                if grep -Eq 'Traceback \(most recent call last\)|Error:' '$REMOTE_LOG.stderr' 2>/dev/null; then
-                    echo \"warning size=\$SIZE duration=\$DURATION\"
-                else
-                    echo \"ok size=\$SIZE duration=\$DURATION\"
-                fi
-            " 2>/dev/null || echo "ssh_failed")
-            echo "✅ 远端 InfiniteTalk 任务完成（$REMOTE_SUMMARY）"
-            break
-            ;;
-        status=*)
-            echo "❌ 远端 InfiniteTalk 任务失败，日志尾部如下：" >&2
-            ssh -p $PORT $SSH_OPTS $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
-            exit 1
-            ;;
-        running*)
-            sleep "$POLL_INTERVAL"
-            ;;
-        ssh_failed|missing_status)
-            echo "⚠️ 无法获取远端 InfiniteTalk 状态，稍后重试..." >&2
-            sleep "$POLL_INTERVAL"
-            ;;
-        *)
-            echo "❌ 远端 InfiniteTalk 任务状态异常：$STATUS_OUTPUT" >&2
-            ssh -p $PORT $SSH_OPTS $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
-            exit 1
-            ;;
-    esac
-done
+remote_job_poll "InfiniteTalk" "$REMOTE_STATUS" "$REMOTE_PID_VALUE" "$REMOTE_OUTPUT" "$REMOTE_LOG" \
+    "$REMOTE_LOG.stderr" "$POLL_INTERVAL" "$MAX_POLL_MINUTES"
 
 echo "📥 下载唇形同步视频..."
-scp -P $PORT -o ServerAliveInterval=60 -o ServerAliveCountMax=7 "$USER@$HOST:$REMOTE_OUTPUT" "$VIDEO_OUTPUT"
+scp -P $PORT $SSH_OPTS "$USER@$HOST:$REMOTE_OUTPUT" "$VIDEO_OUTPUT"
 
 echo "✅ InfiniteTalk 完成: $VIDEO_OUTPUT"

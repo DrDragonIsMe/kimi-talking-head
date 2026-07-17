@@ -25,6 +25,23 @@ INDEX_TTS_DIR="${INDEX_TTS_DIR:-/root/aigc_apps/index-tts}"
 MUSETALK_DIR="${MUSETALK_DIR:-/root/aigc_apps/MuseTalk}"
 LOCAL_SERVER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 依赖版本锁定：server/versions.env 中 *_REF 留空 = 跟随上游 HEAD（现状）；
+# 填入 commit/tag 后，clone/pull 会检出该版本，消除 HEAD 漂移。
+if [ -f "$LOCAL_SERVER_DIR/versions.env" ]; then
+    source "$LOCAL_SERVER_DIR/versions.env"
+fi
+# versions.env 缺失时的兜底默认值（与历史行为一致：不锁版本）
+TORCH_SPEC="${TORCH_SPEC:-torch torchvision torchaudio}"
+
+# 在已有或新克隆的仓库上检出指定版本（空值跳过）。
+checkout_ref() {
+    local dir=$1 ref=${2:-}
+    [ -z "$ref" ] && return 0
+    git -C "$dir" fetch --depth 1 origin "$ref"
+    git -C "$dir" checkout --detach FETCH_HEAD
+    echo "   🔒 $(basename "$dir") 已锁定到 $ref"
+}
+
 COMFYUI_REPO="${GITHUB_MIRROR}https://github.com/comfyanonymous/ComfyUI.git"
 INFINITETALK_REPO="${GITHUB_MIRROR}https://github.com/MeiGen-AI/InfiniteTalk.git"
 WANVIDEO_REPO="${GITHUB_MIRROR}https://github.com/kijai/ComfyUI-WanVideoWrapper.git"
@@ -65,6 +82,7 @@ else
     rm -rf "$COMFYUI_DIR"
     git clone --depth 1 "$COMFYUI_REPO" "$COMFYUI_DIR"
 fi
+checkout_ref "$COMFYUI_DIR" "${COMFYUI_REF:-}"
 
 cd "$COMFYUI_DIR"
 if [ -x "$COMFYUI_DIR/venv/bin/python3" ]; then
@@ -76,11 +94,11 @@ fi
 source venv/bin/activate
 pip install --upgrade pip wheel setuptools || true
 
-# PyTorch with CUDA 12.6 (adjust for your driver)
+# PyTorch with CUDA 12.6 (adjust for your driver)；版本规格见 server/versions.env 的 TORCH_SPEC
 if [ "$USE_CPU_ONLY" = "1" ]; then
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+    pip install $TORCH_SPEC --index-url https://download.pytorch.org/whl/cpu
 else
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+    pip install $TORCH_SPEC --index-url https://download.pytorch.org/whl/cu126
 fi
 
 pip install -r requirements.txt
@@ -93,7 +111,7 @@ mkdir -p custom_nodes
 cd custom_nodes
 
 clone_or_pull() {
-    local dir=$1 url=$2
+    local dir=$1 url=$2 ref=${3:-}
     if [ -d "$dir/.git" ]; then
         # Mark the directory safe to avoid "dubious ownership" failures when run as root
         git config --global --add safe.directory "$(cd "$dir" && pwd)" 2>/dev/null || true
@@ -102,13 +120,14 @@ clone_or_pull() {
         rm -rf "$dir"
         git clone --depth 1 "$url" "$dir"
     fi
+    checkout_ref "$dir" "$ref"
 }
 
-clone_or_pull InfiniteTalk "$INFINITETALK_REPO"
-clone_or_pull ComfyUI-WanVideoWrapper "$WANVIDEO_REPO"
-clone_or_pull ComfyUI-VideoHelperSuite "$VIDEO_HELPER_REPO"
-clone_or_pull ComfyUI-KJNodes "$KJ_NODES_REPO"
-clone_or_pull ComfyUI-Manager "$MANAGER_REPO"
+clone_or_pull InfiniteTalk "$INFINITETALK_REPO" "${INFINITETALK_REF:-}"
+clone_or_pull ComfyUI-WanVideoWrapper "$WANVIDEO_REPO" "${WANVIDEO_REF:-}"
+clone_or_pull ComfyUI-VideoHelperSuite "$VIDEO_HELPER_REPO" "${VIDEO_HELPER_REF:-}"
+clone_or_pull ComfyUI-KJNodes "$KJ_NODES_REPO" "${KJ_NODES_REF:-}"
+clone_or_pull ComfyUI-Manager "$MANAGER_REPO" "${MANAGER_REF:-}"
 
 cd "$COMFYUI_DIR"
 # Install per-node requirements where present
@@ -133,6 +152,7 @@ else
     rm -rf "$INDEX_TTS_DIR"
     git clone --depth 1 "$INDEX_TTS_REPO" "$INDEX_TTS_DIR"
 fi
+checkout_ref "$INDEX_TTS_DIR" "${INDEX_TTS_REF:-}"
 
 cd "$INDEX_TTS_DIR"
 if [ -x "$INDEX_TTS_DIR/.venv/bin/python3" ]; then
@@ -193,6 +213,7 @@ else
     rm -rf "$MUSETALK_DIR"
     git clone --depth 1 "$MUSETALK_REPO" "$MUSETALK_DIR"
 fi
+checkout_ref "$MUSETALK_DIR" "${MUSETALK_REF:-}"
 
 cd "$MUSETALK_DIR"
 if [ -x "$MUSETALK_DIR/venv/bin/python3" ]; then

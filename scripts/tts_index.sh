@@ -2,12 +2,14 @@
 set -eo pipefail
 # 注意：不开启 -u，避免远端返回空值时触发 unbound variable
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/remote_job.sh"
+
 TEXT_FILE=$1
 OUTPUT_AUDIO=$2
 CONFIG="config/servers.json"
 PROFILE="${PROFILE:-config/host_profile.json}"
 RUN_ID="${PIPELINE_RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
-SSH_OPTS="-o ServerAliveInterval=60 -o ServerAliveCountMax=7"
+SSH_OPTS="$REMOTE_JOB_SSH_OPTS"
 
 TEXT=$(cat "$TEXT_FILE" | tr '\n' ' ' | sed 's/  */ /g')
 REFERENCE_AUDIO=$(jq -r '.voice.reference_audio' $PROFILE)
@@ -58,11 +60,12 @@ USER=$(echo "$SERVER_INFO" | cut -d: -f4)
 WORKSPACE=$(echo "$SERVER_INFO" | cut -d: -f5)
 TTS_PATH=$(echo "$SERVER_INFO" | cut -d: -f6)
 TTS_VENV=$(jq -r ".${SERVER_KEY}.tts_python_env" $CONFIG)
+remote_job_init "$HOST" "$PORT" "$USER"
 
 echo "🎙️ 上传参考音频到服务器（$SERVER_KEY: $HOST:$PORT）..."
 REMOTE_DIR="$WORKSPACE/voice_ref"
 ssh -p "$PORT" $SSH_OPTS "$USER@$HOST" "mkdir -p $REMOTE_DIR"
-scp -P "$PORT" -o ServerAliveInterval=60 -o ServerAliveCountMax=7 "$REFERENCE_AUDIO" "$USER@$HOST:$REMOTE_DIR/$REF_BASENAME"
+scp -P "$PORT" $SSH_OPTS "$REFERENCE_AUDIO" "$USER@$HOST:$REMOTE_DIR/$REF_BASENAME"
 
 # TTS_PATH may be either the directory containing remote_worker.py or a wrapper
 # script; derive the root directory accordingly.
@@ -78,21 +81,7 @@ echo "   TTS 路径: $TTS_PATH"
 echo "   TTS 根目录: $TTS_ROOT"
 echo "   模型目录: $MODEL_DIR"
 
-if [ -n "$TTS_VENV" ] && [ "$TTS_VENV" != "" ] && [ "$TTS_VENV" != "null" ]; then
-    # Conda envs expose .../envs/<name>/bin/activate; use conda shell hook to avoid
-    # "conda: command not found" or broken source of the activate script.
-    if [[ "$TTS_VENV" =~ /envs/([^/]+)/bin/activate$ ]]; then
-        CONDA_ENV="${BASH_REMATCH[1]}"
-        CONDA_ROOT="${TTS_VENV%/envs/$CONDA_ENV/bin/activate}"
-        ACTIVATE_CMD="source \"$CONDA_ROOT/etc/profile.d/conda.sh\" && conda activate \"$CONDA_ENV\""
-    elif echo "$TTS_VENV" | grep -q "activate"; then
-        ACTIVATE_CMD="source $TTS_VENV"
-    else
-        ACTIVATE_CMD="conda activate $TTS_VENV"
-    fi
-else
-    ACTIVATE_CMD=""
-fi
+ACTIVATE_CMD=$(remote_job_activate_cmd "$TTS_VENV")
 
 REMOTE_OUTPUT="$WORKSPACE/output/tts_output_${RUN_ID}.wav"
 REMOTE_LOG="$WORKSPACE/output/tts_${RUN_ID}.log"
@@ -141,12 +130,8 @@ printf -v REMOTE_JOB_Q '%q' "$REMOTE_JOB"
 printf -v REMOTE_STATUS_Q '%q' "$REMOTE_STATUS"
 
 echo "🚀 通过 nohup 提交远端后台 TTS 任务..."
-ssh -p $PORT $SSH_OPTS $USER@$HOST << EOF
-    set -e
-    mkdir -p "$WORKSPACE/output"
-    rm -f "$REMOTE_STATUS" "$REMOTE_PID" "$REMOTE_LOG" "$REMOTE_JOB" "$REMOTE_RUNNER"
-    printf '%s' '$JOB_B64' | base64 -d > "$REMOTE_JOB"
-    cat > "$REMOTE_RUNNER" << 'REMOTE_RUNNER_EOF'
+REMOTE_PID_VALUE=$(remote_job_submit "$REMOTE_STATUS" "$REMOTE_PID" "$REMOTE_LOG" "$REMOTE_RUNNER" "$REMOTE_JOB" \
+    "printf '%s' '$JOB_B64' | base64 -d > \"$REMOTE_JOB\"" << EOF
 #!/bin/bash
 set -e
 ACTIVATE_CMD=$ACTIVATE_CMD_Q
@@ -159,89 +144,20 @@ if [ -n "\$ACTIVATE_CMD" ]; then
 fi
 cd "\$TTS_ROOT"
 python remote_worker.py < "\$REMOTE_JOB" > >(tee -a "${REMOTE_LOG}.stdout") 2> >(tee -a "${REMOTE_LOG}.stderr" >&2)
-REMOTE_RUNNER_EOF
-    chmod +x "$REMOTE_RUNNER"
-    nohup bash "$REMOTE_RUNNER" > "$REMOTE_LOG" 2>&1 </dev/null &
-    echo \$! > "$REMOTE_PID"
 EOF
+)
 
-REMOTE_PID_VALUE=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "cat '$REMOTE_PID' 2>/dev/null || echo ''")
 if [ -z "$REMOTE_PID_VALUE" ]; then
     echo "❌ 远端 TTS 任务未能启动" >&2
     exit 1
 fi
 echo "🧵 后台任务已启动，PID: $REMOTE_PID_VALUE"
 
-poll_count=0
-max_poll=$((MAX_POLL_MINUTES * 60 / POLL_INTERVAL))
-
-while true; do
-    poll_count=$((poll_count + 1))
-    if [ "$poll_count" -gt "$max_poll" ]; then
-        echo "❌ 远端 TTS 任务超时（>${MAX_POLL_MINUTES}分钟），强制终止" >&2
-        ssh -p $PORT $SSH_OPTS $USER@$HOST "kill '$REMOTE_PID_VALUE' 2>/dev/null || true" || true
-        exit 1
-    fi
-
-    STATUS_OUTPUT=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "
-        set -e
-        if [ -f '$REMOTE_STATUS' ]; then
-            printf 'status=%s\n' \"\$(cat '$REMOTE_STATUS')\"
-        elif kill -0 '$REMOTE_PID_VALUE' 2>/dev/null; then
-            if [ -f '$REMOTE_OUTPUT' ]; then
-                SIZE=\$(wc -c < '$REMOTE_OUTPUT' 2>/dev/null || echo 0)
-                printf 'running size=%s\n' \"\$SIZE\"
-            else
-                printf 'running size=0\n'
-            fi
-        else
-            printf 'missing_status\n'
-        fi
-    " 2>/dev/null || echo "ssh_failed")
-
-    echo "⏳ TTS 状态: $STATUS_OUTPUT"
-
-    case "$STATUS_OUTPUT" in
-        status=0*)
-            REMOTE_SUMMARY=$(ssh -p $PORT $SSH_OPTS $USER@$HOST "
-                set -e
-                if [ ! -s '$REMOTE_OUTPUT' ]; then
-                    echo 'missing_output'
-                    exit 0
-                fi
-                SIZE=\$(wc -c < '$REMOTE_OUTPUT' 2>/dev/null || echo 0)
-                DURATION=\$(ffprobe -v error -show_entries format=duration -of csv=p=0 '$REMOTE_OUTPUT' 2>/dev/null || echo 0)
-                if grep -Eq 'Traceback \(most recent call last\)|Error:' '$REMOTE_LOG' 2>/dev/null; then
-                    echo \"warning size=\$SIZE duration=\$DURATION\"
-                else
-                    echo \"ok size=\$SIZE duration=\$DURATION\"
-                fi
-            " 2>/dev/null || echo "ssh_failed")
-            echo "✅ 远端 TTS 任务完成（$REMOTE_SUMMARY）"
-            break
-            ;;
-        status=*)
-            echo "❌ 远端 TTS 任务失败，日志尾部如下：" >&2
-            ssh -p $PORT $SSH_OPTS $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
-            exit 1
-            ;;
-        running*)
-            sleep "$POLL_INTERVAL"
-            ;;
-        ssh_failed|missing_status)
-            echo "⚠️ 无法获取远端 TTS 状态，稍后重试..."
-            sleep "$POLL_INTERVAL"
-            ;;
-        *)
-            echo "❌ 远端 TTS 任务状态异常：$STATUS_OUTPUT" >&2
-            ssh -p $PORT $SSH_OPTS $USER@$HOST "tail -n 80 '$REMOTE_LOG' '$REMOTE_LOG.stderr' 2>/dev/null" >&2 || true
-            exit 1
-            ;;
-    esac
-done
+remote_job_poll "TTS" "$REMOTE_STATUS" "$REMOTE_PID_VALUE" "$REMOTE_OUTPUT" "$REMOTE_LOG" \
+    "$REMOTE_LOG" "$POLL_INTERVAL" "$MAX_POLL_MINUTES"
 
 echo "📥 下载 TTS 音频到本地..."
-scp -P $PORT -o ServerAliveInterval=60 -o ServerAliveCountMax=7 "$USER@$HOST:$REMOTE_OUTPUT" "$OUTPUT_AUDIO"
+scp -P $PORT $SSH_OPTS "$USER@$HOST:$REMOTE_OUTPUT" "$OUTPUT_AUDIO"
 
 if ! has_valid_local_audio "$OUTPUT_AUDIO"; then
     echo "❌ 下载后的 TTS 音频无效或时长过短: $OUTPUT_AUDIO" >&2
