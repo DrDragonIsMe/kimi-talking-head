@@ -39,6 +39,18 @@ done
 
 source "$PROJECT_DIR/scripts/lib/state.sh"
 
+# 同名 run 复用时源与目标是同一文件，cp 会报 "are identical" 并中断脚本。
+# macOS bash 3.2 不支持 test -ef，用 stat 比较设备号+inode（BSD/GNU 两态）。
+copy_if_different() {
+  local a b
+  a=$(stat -f '%d:%i' "$1" 2>/dev/null || stat -c '%d:%i' "$1" 2>/dev/null)
+  b=$(stat -f '%d:%i' "$2" 2>/dev/null || stat -c '%d:%i' "$2" 2>/dev/null)
+  if [ -n "$a" ] && [ "$a" = "$b" ]; then
+    return 0
+  fi
+  cp -f "$1" "$2"
+}
+
 has_valid_srt() {
     local file="$1"
     [ -s "$file" ] && grep -Ec '^[0-9]+$' "$file" 2>/dev/null | awk '{exit !($1 >= 3)}'
@@ -48,7 +60,7 @@ mkdir -p "$WORK_DIR" "$OUTPUT_DIR" "$PROJECT_DIR/public/scene_visuals/$OUTPUT_NA
 
 # 1. 复用音频和原始唇形视频，并先算出音频时长
 echo "🎙️  复用音频: $AUDIO_SOURCE"
-cp -f "$AUDIO_SOURCE" "$WORK_DIR/audio.wav"
+copy_if_different "$AUDIO_SOURCE" "$WORK_DIR/audio.wav"
 
 AUDIO_DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$WORK_DIR/audio.wav")
 AUDIO_FRAMES=$(echo "$AUDIO_DURATION * 30" | bc | cut -d. -f1)
@@ -58,7 +70,7 @@ export AUDIO_FRAMES
 export TEMPLATE
 
 echo "🎬 复用原始唇形视频: $LIPSYNC_RAW_SOURCE"
-cp -f "$LIPSYNC_RAW_SOURCE" "$WORK_DIR/lip_synced_raw.mp4"
+copy_if_different "$LIPSYNC_RAW_SOURCE" "$WORK_DIR/lip_synced_raw.mp4"
 
 # 2. 后处理：统一分辨率/帧率，并按比例拉伸唇形视频，使其时长严格等于音频
 LIPSYNC_POST="$WORK_DIR/lip_synced.mp4"
@@ -77,16 +89,16 @@ init_state "$WORK_DIR"
 SOURCE_WORK_DIR="$(cd "$(dirname "$AUDIO_SOURCE")" && pwd)"
 if [ -s "$SOURCE_WORK_DIR/script.txt" ]; then
     echo "📝 复用源口播稿: $SOURCE_WORK_DIR/script.txt"
-    cp -f "$SOURCE_WORK_DIR/script.txt" "$WORK_DIR/script.txt"
+    copy_if_different "$SOURCE_WORK_DIR/script.txt" "$WORK_DIR/script.txt"
     mark_completed "$WORK_DIR" script "$WORK_DIR/script.txt"
     # 同时复用原始 Whisper 输出，避免重复跑 ASR
     if [ -s "$SOURCE_WORK_DIR/subtitles_raw.json" ]; then
         echo "📝 复用源 Whisper JSON: $SOURCE_WORK_DIR/subtitles_raw.json"
-        cp -f "$SOURCE_WORK_DIR/subtitles_raw.json" "$WORK_DIR/subtitles_raw.json"
+        copy_if_different "$SOURCE_WORK_DIR/subtitles_raw.json" "$WORK_DIR/subtitles_raw.json"
     fi
     if has_valid_srt "$SOURCE_WORK_DIR/subtitles_raw.srt"; then
         echo "📝 复用源 Whisper SRT: $SOURCE_WORK_DIR/subtitles_raw.srt"
-        cp -f "$SOURCE_WORK_DIR/subtitles_raw.srt" "$WORK_DIR/subtitles_raw.srt"
+        copy_if_different "$SOURCE_WORK_DIR/subtitles_raw.srt" "$WORK_DIR/subtitles_raw.srt"
     fi
 else
     echo "⚠️  未找到源口播稿 $SOURCE_WORK_DIR/script.txt，将重新生成（可能与音频不一致）" >&2
