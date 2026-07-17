@@ -115,6 +115,7 @@
     }
   },
   "scene_visuals": {
+    "media_type": "image",
     "providers": ["pexels", "unsplash", "wanx", "placeholder"],
     "pexels": {
       "api_key": "your-pexels-api-key",
@@ -180,6 +181,7 @@
       "showTalkingPoints": false,
       "showProgressBreadcrumb": true,
       "showProgressBar": true,
+      "showWaveform": true,
       "showChapterCards": true,
       "showDataBars": false,
       "showQuoteHighlight": false,

@@ -109,8 +109,11 @@ if (props.sceneVisuals !== undefined) {
         return;
       }
       if (scene.start < prevEnd - 0.001) fail(`sceneVisuals[${i}] 与前一场景时间重叠`);
+      if (scene.type !== undefined && !['image', 'video'].includes(scene.type)) {
+        fail(`sceneVisuals[${i}] 的 type 必须是 image 或 video，当前: ${scene.type}`);
+      }
       if (typeof scene.path !== 'string' || !fileExistsUnderPublic(scene.path)) {
-        fail(`sceneVisuals[${i}] 的图片文件不存在: ${scene.path}`);
+        fail(`sceneVisuals[${i}] 的素材文件不存在: ${scene.path}`);
       }
       prevEnd = scene.end;
     });

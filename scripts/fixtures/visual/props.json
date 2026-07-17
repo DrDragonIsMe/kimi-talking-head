@@ -58,8 +58,9 @@
     {
       "start": 4,
       "end": 8,
-      "path": "fixture_visual/scene_b.png",
-      "provider": "pexels"
+      "path": "fixture_visual/host.mp4",
+      "provider": "pexels",
+      "type": "video"
     }
   ],
   "chapters": [

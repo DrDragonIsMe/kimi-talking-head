@@ -1,9 +1,9 @@
 import React from 'react';
-import { interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { interpolate, staticFile, useCurrentFrame, useVideoConfig, OffthreadVideo, Loop } from 'remotion';
 import { useSubtitles, SubtitleCue } from '../hooks/useSubtitles';
 import { matchSceneStyle, extractTalkingPoints } from '../utils/keywordMatcher';
 import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
-import { getSceneWindow, getKenBurnsTransform } from '../utils/sceneMotion';
+import { getSceneWindow, getKenBurnsTransform, getSceneTransition } from '../utils/sceneMotion';
 import { ChartLines } from './effects/ChartLines';
 import { PulseWarning } from './effects/PulseWarning';
 import { GridFlow } from './effects/GridFlow';
@@ -31,11 +31,31 @@ interface DynamicBackgroundProps {
     end: number;
     path: string;
     provider: string;
+    type?: 'image' | 'video';
+    duration?: number;
     query?: string;
     license?: string;
   }>;
   variant?: 'default' | 'hero';
 }
+
+/** 场景素材：image 用 <img>；video（B-roll）用 OffthreadVideo，按片段时长 Loop 循环 */
+const SceneMedia: React.FC<{
+  visual: { path: string; type?: 'image' | 'video'; duration?: number };
+  style: React.CSSProperties;
+}> = ({ visual, style }) => {
+  const { fps } = useVideoConfig();
+  if (visual.type === 'video') {
+    const video = <OffthreadVideo src={staticFile(visual.path)} muted style={style} />;
+    if (visual.duration && visual.duration > 0) {
+      return (
+        <Loop durationInFrames={Math.max(1, Math.round(visual.duration * fps))}>{video}</Loop>
+      );
+    }
+    return video;
+  }
+  return <img src={staticFile(visual.path)} style={style} />;
+};
 
 export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, subtitles, layout, sceneVisuals = [], variant = 'default' }) => {
   const { fps } = useVideoConfig();
@@ -69,7 +89,7 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
   const kenBurnsCss = (t: { scale: number; translateX: number; translateY: number }) =>
     `scale(${t.scale}) translate(${t.translateX}%, ${t.translateY}%)`;
 
-  // hero 变体：交叉淡化窗口内双图叠加；其余时间单图。
+  // hero 变体：切换窗口内双图叠加（fade/wipe/zoom 三种确定性轮换）；
   // default 变体保持原有透明度呼吸，仅叠加 Ken Burns 运动。
   const sceneProgress = sceneWindow.sceneProgress;
   const visualOpacity = activeVisual
@@ -78,6 +98,25 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
         extrapolateRight: 'clamp',
       })
     : 0;
+
+  const transition = getSceneTransition(sceneWindow.index);
+  const fadeProgress = sceneWindow.crossfadeProgress;
+  const heroCurrentOpacity = isHero
+    ? transition === 'fade'
+      ? 0.95 * fadeProgress
+      : transition === 'zoom'
+        ? 0.95 * Math.min(1, fadeProgress * 1.5)
+        : 0.95
+    : visualOpacity;
+  const heroClipPath =
+    isHero && transition === 'wipe-left' && fadeProgress < 1
+      ? `inset(0 ${((1 - fadeProgress) * 100).toFixed(2)}% 0 0)`
+      : undefined;
+  const zoomScale =
+    isHero && transition === 'zoom' && fadeProgress < 1 ? 1 + 0.08 * (1 - fadeProgress) : 1;
+  const heroTransform = kenBurns
+    ? `${kenBurnsCss(kenBurns)}${zoomScale !== 1 ? ` scale(${zoomScale.toFixed(4)})` : ''}`
+    : undefined;
 
   return (
     <div style={{
@@ -142,31 +181,32 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
         {activeVisual ? (
           <>
             {isHero && sceneWindow.previous && previousKenBurns ? (
-              <img
-                src={staticFile(sceneWindow.previous.path)}
+              <SceneMedia
+                visual={sceneWindow.previous}
                 style={{
                   position: 'absolute',
                   inset: 0,
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
-                  opacity: 1 - sceneWindow.crossfadeProgress,
+                  opacity: transition === 'fade' ? 1 - fadeProgress : 1,
                   transform: kenBurnsCss(previousKenBurns),
                   transformOrigin: 'center center',
                   filter: 'contrast(1.02) saturate(0.95)',
                 }}
               />
             ) : null}
-            <img
-              src={staticFile(activeVisual.path)}
+            <SceneMedia
+              visual={activeVisual}
               style={{
                 position: isHero && sceneWindow.previous ? 'absolute' : undefined,
                 inset: isHero && sceneWindow.previous ? 0 : undefined,
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
-                opacity: isHero ? 0.95 * sceneWindow.crossfadeProgress : visualOpacity,
-                transform: kenBurns ? kenBurnsCss(kenBurns) : undefined,
+                opacity: heroCurrentOpacity,
+                clipPath: heroClipPath,
+                transform: heroTransform,
                 transformOrigin: 'center center',
                 filter: 'contrast(1.02) saturate(0.95)',
               }}

@@ -15,7 +15,9 @@
 - **唇形同步**：基于 [InfiniteTalk](https://github.com/MeiGen-AI/InfiniteTalk) 将主播照片与音频合成口型匹配视频。
 - **工程级字幕**：Whisper 词级时间戳 + 口播稿字符级对齐，字幕内容严格等于原文，且自动校验稿音一致性。
 - **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote` 三套字幕 DNA 可选。
-- **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移，场景间 0.45s 交叉淡化，全部确定性驱动。
+- **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移，场景间 fade/wipe/zoom 三种转场确定性轮换。
+- **视频 B-roll**：`scene_visuals.media_type` 支持 `video / mixed`，Pexels 视频素材自动检索下载、按片段时长循环铺满场景，图片 provider 自动兜底。
+- **音频可视化**：底部实时波形条（`visualizeAudio` 驱动，可关闭）。
 - **BGM 与音效**：BGM 循环垫底、首尾淡入淡出；hero 时刻自动配入场音效（`assets/sfx/hero.*` 优先，缺失时 ffmpeg 合成兜底）。
 - **竖屏分镜布局**：`portrait-hybrid` 模式支持 `default / host-focus / visual-focus / minimal / balanced` 五种预设。
 - **动态视觉**：根据内容自动切换场景背景、关键词高亮、章节面包屑、观点 bullets、品牌结尾卡。
@@ -186,7 +188,9 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 - `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）
 - `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
 - `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
+- `scene_visuals.media_type`：场景素材类型，`image`（默认）/ `video`（全视频 B-roll）/ `mixed`（奇偶交替）
 - `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）
+- `video_layout.hybrid.showWaveform`：底部音频波形条（默认开）
 - `product.*`：品牌文案、 pills、颜色
 
 ### `config/servers.json`

@@ -22,6 +22,10 @@ export interface SceneVisual {
   end: number;
   path: string;
   provider: string;
+  /** 素材类型：image（默认）或 video（B-roll 视频） */
+  type?: 'image' | 'video';
+  /** 视频片段时长（秒），用于 Loop 循环铺满场景 */
+  duration?: number;
   prompt?: string;
   query?: string;
   text?: string;
@@ -68,6 +72,7 @@ export interface VideoLayoutConfig {
     showTalkingPoints?: boolean;
     showProgressBreadcrumb?: boolean;
     showProgressBar?: boolean;
+    showWaveform?: boolean;
     showChapterCards?: boolean;
     showDataBars?: boolean;
     showQuoteHighlight?: boolean;

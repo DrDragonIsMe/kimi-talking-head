@@ -573,6 +573,55 @@ async function fetchWithPexels(query, _prompt, filePath, config) {
   };
 }
 
+// Pexels 视频搜索：与图片同链路（API key 复用 pexels 配置或 PEXELS_API_KEY）。
+// 返回 MP4 直链，优先竖屏、宽度 ≥750 的最小视频文件。
+async function fetchWithPexelsVideo(query, _prompt, filePath, config) {
+  const apiKey = config.api_key || process.env.PEXELS_API_KEY || '';
+  if (!apiKey) {
+    throw new Error('Pexels API key not configured');
+  }
+  const orientation = config.orientation || 'portrait';
+  const encodedQuery = encodeURIComponent(query);
+  const url = `https://api.pexels.com/v1/videos/search?query=${encodedQuery}&orientation=${orientation}&per_page=10`;
+  const data = await httpGetJson(url, { Authorization: apiKey });
+  const videos = data.videos || [];
+  if (!videos.length) {
+    throw new Error(`No Pexels video results for "${query}"`);
+  }
+
+  // 在前 3 个结果里找最合适的文件：优先宽 ≥750 的最小文件（省带宽），兜底取可用最大
+  let bestFile = null;
+  let bestVideo = null;
+  for (const video of videos.slice(0, 3)) {
+    const files = (video.video_files || []).filter(
+      (f) => f.link && (f.file_type || '').includes('mp4')
+    );
+    if (!files.length) continue;
+    const sorted = files.slice().sort((a, b) => (a.width || 0) - (b.width || 0));
+    const pick = sorted.find((f) => (f.width || 0) >= 750) || sorted[sorted.length - 1];
+    if (pick) {
+      bestFile = pick;
+      bestVideo = video;
+      break;
+    }
+  }
+  if (!bestFile) {
+    throw new Error(`No usable MP4 file in Pexels video results for "${query}"`);
+  }
+
+  await downloadFile(bestFile.link, filePath);
+  return {
+    provider: 'pexels_video',
+    type: 'video',
+    // Pexels 返回的片段时长（秒），渲染端用它做 Loop 循环铺满场景
+    duration: typeof bestVideo.duration === 'number' ? bestVideo.duration : undefined,
+    sourceUrl: bestVideo.url || 'https://www.pexels.com',
+    license: 'Pexels License (free to use)',
+    author: bestVideo.user?.name || 'Unknown',
+    attributionRequired: false,
+  };
+}
+
 function findArkcliGenOutput(cwd) {
   // arkcli +gen 默认把产物下载到 CWD，文件名通常是 <task-id>.png 或 prompt 相关
   const files = fs.readdirSync(cwd).filter((f) => /\.(png|jpg|jpeg)$/i.test(f));
@@ -684,29 +733,54 @@ async function fetchWithPlaceholder(_query, _prompt, filePath, _config) {
 
 const PROVIDERS = {
   pexels: fetchWithPexels,
+  pexels_video: fetchWithPexelsVideo,
   unsplash: fetchWithUnsplash,
   wanx: fetchWithWanx,
   placeholder: fetchWithPlaceholder,
 };
 
-async function fetchSceneVisual(query, prompt, filePath, config) {
-  const providers = (config.providers || ['placeholder']).filter((p) => PROVIDERS[p]);
-  if (!providers.length) providers.push('placeholder');
+// provider 名 → 产物扩展名与类型
+const PROVIDER_MEDIA = {
+  pexels_video: { ext: '.mp4', type: 'video' },
+};
+const providerMedia = (providerName) => PROVIDER_MEDIA[providerName] || { ext: '.png', type: 'image' };
+
+function isValidMedia(filePath) {
+  // 与 isValidImage 同标准的宽松校验：存在且非小文件（视频至少 50KB）
+  if (!fs.existsSync(filePath)) return false;
+  const size = fs.statSync(filePath).size;
+  return filePath.endsWith('.mp4') ? size > 50 * 1024 : size > 2000;
+}
+
+// preferVideo=true 时把 pexels_video 插到链首，图片 provider 兜底
+async function fetchSceneVisual(query, prompt, basePathNoExt, config, preferVideo) {
+  let providers = (config.providers || ['placeholder']).filter((p) => PROVIDERS[p]);
+  if (!providers.length) providers = ['placeholder'];
+  if (preferVideo && !providers.includes('pexels_video')) {
+    providers = ['pexels_video', ...providers];
+  }
 
   for (const providerName of providers) {
+    const media = providerMedia(providerName);
+    const filePath = `${basePathNoExt}${media.ext}`;
     try {
       console.log(`  尝试 ${providerName}: "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}"`);
-      const meta = await PROVIDERS[providerName](query, prompt, filePath, config[providerName] || {});
-      if (isValidImage(filePath)) {
+      // 视频 provider 复用 pexels 的 api_key 配置段
+      const providerConfig =
+        providerName === 'pexels_video'
+          ? { ...(config.pexels || {}), ...(config.pexels_video || {}) }
+          : config[providerName] || {};
+      const meta = await PROVIDERS[providerName](query, prompt, filePath, providerConfig);
+      if (isValidMedia(filePath)) {
         console.log(`  ✅ ${providerName} 成功 -> ${filePath}`);
-        return meta;
+        return { meta: { ...meta, type: media.type }, filePath };
       }
     } catch (err) {
       console.warn(`  ⚠️ ${providerName} 失败: ${err.message}`);
     }
   }
 
-  throw new Error(`All scene visual providers failed for ${filePath}`);
+  throw new Error(`All scene visual providers failed for ${basePathNoExt}`);
 }
 
 // -------------- 主流程 --------------
@@ -762,15 +836,14 @@ const main = async () => {
     const summary = llmResult?.summary || '';
 
     const slug = toSlug(query, i);
-    const fileName = `${slug}.png`;
-    const filePath = path.join(outputDir, fileName);
-    const relativePath = path.relative(path.join(process.cwd(), 'public'), filePath);
+    // 扩展名在抓取时按 provider 决定（pexels_video→.mp4，图片→.png）
+    const basePathNoExt = path.join(outputDir, slug);
 
     // Build a prompt that explicitly ties the image to the scene meaning.
     let prompt = `Vertical editorial visual for a Chinese business news explainer. Topic: ${videoTitle || 'business insight'}. Scene focus: ${query}. Narrative hint: ${text.slice(0, 300)}. Editorial business magazine, realistic, cinematic soft light, data-driven workplace scenes. Clean composition, premium newsroom art direction, no text, no letters, no watermark, no logo, no UI screenshot.`;
     prompt = buildPromptFromShots(sceneShots, prompt);
 
-    return { start, end, text, query, aiPrompt, summary, slug, fileName, filePath, relativePath, prompt, shots: sceneShots };
+    return { start, end, text, query, aiPrompt, summary, slug, basePathNoExt, prompt, shots: sceneShots };
   };
 
   // Pre-extract LLM keywords with controlled concurrency so we don't hammer the API.
@@ -810,29 +883,49 @@ const main = async () => {
 
   const processScene = async (i, llmResult) => {
     const info = buildSceneInfo(i, llmResult);
+
+    // media_type: image（默认）| video（全视频 B-roll）| mixed（奇偶交替）
+    const mediaType = config.media_type || 'image';
+    const preferVideo = mediaType === 'video' || (mediaType === 'mixed' && i % 2 === 0);
+
+    // 复用检查：两种扩展名都算（按偏好排序）
+    const reuseCandidates = preferVideo
+      ? [`${info.basePathNoExt}.mp4`, `${info.basePathNoExt}.png`]
+      : [`${info.basePathNoExt}.png`, `${info.basePathNoExt}.mp4`];
+    const reusedPath =
+      process.env.FORCE_VISUALS !== '1' ? reuseCandidates.find((p) => isValidMedia(p)) : null;
+
     let meta;
-    if (isValidImage(info.filePath) && process.env.FORCE_VISUALS !== '1') {
-      console.log(`♻️  复用场景画面: ${info.filePath}`);
+    let filePath;
+    if (reusedPath) {
+      console.log(`♻️  复用场景画面: ${reusedPath}`);
+      filePath = reusedPath;
       meta = {
         provider: 'reused',
+        type: reusedPath.endsWith('.mp4') ? 'video' : 'image',
         sourceUrl: '',
         license: 'Reused',
         author: '',
         attributionRequired: false,
       };
     } else {
-      meta = await fetchSceneVisual(info.query, info.prompt, info.filePath, config);
+      const result = await fetchSceneVisual(info.query, info.prompt, info.basePathNoExt, config, preferVideo);
+      meta = result.meta;
+      filePath = result.filePath;
     }
+    const relativePath = path.relative(path.join(process.cwd(), 'public'), filePath);
     const sceneVisual = {
       start: info.start,
       end: info.end,
+      type: meta.type || 'image',
+      ...(typeof meta.duration === 'number' ? { duration: meta.duration } : {}),
       prompt: info.prompt,
       query: info.query,
       text: info.text.slice(0, 400),
       summary: info.summary,
       aiPrompt: info.aiPrompt,
       provider: meta.provider,
-      path: info.relativePath,
+      path: relativePath,
       sourceUrl: meta.sourceUrl,
       license: meta.license,
       author: meta.author,

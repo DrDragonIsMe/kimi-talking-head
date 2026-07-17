@@ -86,3 +86,16 @@ export const getKenBurnsTransform = (sceneIndex: number, progress: number): KenB
       return { scale: 1.06, translateX: 1.5 - 3 * p, translateY: 0 };
   }
 };
+
+export type SceneTransitionKind = 'fade' | 'wipe-left' | 'zoom';
+
+const TRANSITION_ROTATION: SceneTransitionKind[] = ['fade', 'wipe-left', 'zoom'];
+
+/**
+ * 场景切换方式按场景序号确定性轮换。
+ * 注意：index=1 固定为 fade（与旧版交叉淡化一致），勿改——视觉回归基线依赖它。
+ */
+export const getSceneTransition = (sceneIndex: number): SceneTransitionKind => {
+  if (sceneIndex <= 0) return 'fade';
+  return TRANSITION_ROTATION[(sceneIndex - 1) % TRANSITION_ROTATION.length];
+};

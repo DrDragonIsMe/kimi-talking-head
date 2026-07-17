@@ -7,6 +7,7 @@ import { BrandBadge } from './BrandBadge';
 import { HybridInsightCard } from './HybridInsightCard';
 import { FallingChapterCards } from './FallingChapterCards';
 import { TalkingProgressBar } from './TalkingProgressBar';
+import { AudioWaveform } from './AudioWaveform';
 import { SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
 import type { ContentOverlayConfig, SceneVisual } from '../index';
 
@@ -38,6 +39,7 @@ interface PortraitHybridLayoutProps {
     showTalkingPoints?: boolean;
     showProgressBreadcrumb?: boolean;
     showProgressBar?: boolean;
+    showWaveform?: boolean;
     showChapterCards?: boolean;
     showDataBars?: boolean;
     showQuoteHighlight?: boolean;
@@ -131,6 +133,7 @@ const HYBRID_PRESETS: Record<
 };
 
 export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
+  audioPath,
   srtPath,
   subtitles,
   hostVideoPath,
@@ -318,6 +321,11 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
       {/* 底部线性进度条 */}
       {hybridConfig.showProgressBar !== false && talkingDurationFrames ? (
         <TalkingProgressBar durationFrames={talkingDurationFrames} />
+      ) : null}
+
+      {/* 音频波形（进度条上方） */}
+      {hybridConfig.showWaveform !== false ? (
+        <AudioWaveform audioPath={audioPath} />
       ) : null}
     </AbsoluteFill>
   );

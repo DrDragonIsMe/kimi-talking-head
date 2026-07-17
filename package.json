@@ -11,6 +11,7 @@
     "test:visual": "node scripts/test_visual_regression.js"
   },
   "dependencies": {
+    "@remotion/media-utils": "^4.0.0",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",
     "react": "^18.3.1",
