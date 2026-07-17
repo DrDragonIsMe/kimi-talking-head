@@ -1,7 +1,7 @@
 # Server Model Checklist
 
 All paths are relative to `/root/aigc_apps/InfiniteTalk/models` unless noted.
-Total disk requirement: ~55 GB.
+Total disk requirement: ~55 GB for InfiniteTalk, plus ~12 GB for MuseTalk.
 
 ## ComfyUI / InfiniteTalk
 
@@ -39,3 +39,70 @@ Download from the official IndexTTS2 model release (Bilibili/HuggingFace). The `
 ## Wav2Vec
 
 The workflow uses `TencentGameMate/chinese-wav2vec2-base`. It is downloaded automatically on first use by the `DownloadAndLoadWav2VecModel` node (requires internet or a cached HuggingFace cache).
+
+## MuseTalk
+
+All paths are relative to the MuseTalk install directory (default `/root/aigc_apps/MuseTalk`, or `<data-disk>/aigc_apps/MuseTalk` when the system disk is full).
+Total disk requirement: ~12 GB.
+
+### MuseTalk 1.5 (recommended)
+
+```
+models/
+├── musetalkV15/
+│   ├── unet.pth              (~1.4 GB)
+│   └── mususetalk.json
+├── sd-vae-ft-mse/            (~0.5 GB)
+│   ├── config.json
+│   └── diffusion_pytorch_model.bin
+├── whisper/                  (~0.15 GB)
+│   └── tiny.pt  (or base.pt)
+├── face-parse-bisent/        (~0.1 GB)
+│   ├── 79999_iter.pth
+│   └── resnet18-5c106cde.pth
+├── mmdet/                    (~0.15 GB)
+│   └── mmdet_models/
+│       └── retinaface_r50.pth
+└── mmpose/                   (~0.1 GB)
+    └── mmpose_models/
+        └── face-landmarks.pth
+```
+
+### MuseTalk 1.0
+
+```
+models/
+├── musetalk/
+│   ├── pytorch_model.bin     (~1.4 GB)
+│   └── mususetalk.json
+├── sd-vae-ft-mse/
+├── whisper/
+├── face-parse-bisent/
+├── mmdet/
+└── mmpose/
+```
+
+### Download helpers
+
+The official MuseTalk repo provides a `scripts/download.py` helper. You can also download manually from HuggingFace:
+
+```bash
+cd /root/aigc_apps/MuseTalk
+source venv/bin/activate
+
+# Use the official download helper if available
+python scripts/download.py --model musetalkV15
+
+# Or download via huggingface-cli / wget from the model release page:
+# https://huggingface.co/TMElyralab/MuseTalk
+```
+
+After downloading, verify the following files exist before running the pipeline:
+
+```bash
+ls models/musetalkV15/unet.pth
+ls models/sd-vae-ft-mse/config.json
+ls models/whisper/tiny.pt
+```
+
+For servers with limited system-disk space, `server/install.sh` will automatically install MuseTalk on a data disk (`/data`, `/mnt/data`, `/mnt`, or `/home/data`) when `/root/aigc_apps` has less than 25 GB free.

@@ -386,84 +386,117 @@ VISUALS_PUBLIC_DIR="$PROJECT_DIR/public/scene_visuals/$OUTPUT_NAME"
 ) &
 SUBTITLES_VISUALS_PID=$!
 
-# 子任务 B：主播照片缩放 + InfiniteTalk 唇形同步 + FFmpeg 后处理
+# 子任务 B：主播素材准备 + 唇形同步 + FFmpeg 后处理
 (
     set -e
-    CURRENT_PHASE="infinitetalk"
+    CURRENT_PHASE="lipsync"
+    LIPSYNC_ENGINE=$(jq -r '.lipsync.engine // "infinitetalk"' "$PROFILE")
+    echo "🎭 唇形同步引擎: $LIPSYNC_ENGINE"
+
     if is_phase_completed "$WORK_DIR" lipsync "$WORK_DIR/lip_synced_raw.mp4" && [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
         echo "♻️  state: lipsync 已完成，跳过"
     else
-        monitor_phase "infinitetalk" "running" "开始 InfiniteTalk 唇形同步" "$(jq -cn --arg outputFile "$WORK_DIR/lip_synced_raw.mp4" '{videoFile: $outputFile}')"
+        monitor_phase "lipsync" "running" "开始 $LIPSYNC_ENGINE 唇形同步" "$(jq -cn --arg engine "$LIPSYNC_ENGINE" --arg outputFile "$WORK_DIR/lip_synced_raw.mp4" '{engine: $engine, videoFile: $outputFile}')"
         mark_running "$WORK_DIR" lipsync
 
-        HOST_PHOTO=$(jq -r '.host.photo_source' "$PROFILE")
-        HOST_RESIZED="$WORK_DIR/host_resized.jpg"
+        case "$LIPSYNC_ENGINE" in
+            infinitetalk)
+                HOST_PHOTO=$(jq -r '.host.photo_source' "$PROFILE")
+                HOST_RESIZED="$WORK_DIR/host_resized.jpg"
 
-        if [ ! -s "$HOST_RESIZED" ]; then
-            echo "🖼️  缩放主播照片..."
-            resize_host_image "$PROJECT_DIR/$HOST_PHOTO" "$HOST_RESIZED"
-        fi
-
-        if video_matches_audio "$WORK_DIR/lip_synced_raw.mp4" "$AUDIO_DURATION" && [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
-            echo "♻️  复用已有 InfiniteTalk 原始结果: $WORK_DIR/lip_synced_raw.mp4"
-        else
-            # Prefer ComfyUI API on primary server when available, fallback to CLI
-            PRIMARY_IT_PATH=$(jq -r '.primary.infinitetalk_path // ""' "$CONFIG")
-            if [ -n "$PRIMARY_IT_PATH" ] && [ "$PRIMARY_IT_PATH" != "null" ]; then
-                USE_SERVER_SIDE=$(jq -r '.primary.use_server_side // "true"' "$CONFIG")
-                if [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "true" ] || [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "1" ]; then
-                    echo "🎬 使用服务器端 ComfyUI API 进行 InfiniteTalk 唇形同步（无本地 SSH 隧道）..."
-                    if [ "${FORCE_LIPSYNC:-0}" = "1" ]; then
-                        echo "🧹 FORCE_LIPSYNC=1，强制重新生成，清除已有分段缓存与旧输出"
-                        rm -f "$WORK_DIR"/lip_synced_raw_seg*.mp4
-                        rm -f "$WORK_DIR"/lip_synced_raw.mp4
-                        bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
-                            --config "$CONFIG" \
-                            --profile "$PROFILE" \
-                            --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
-                            --image "$HOST_RESIZED" \
-                            --audio "$WORK_DIR/audio.wav" \
-                            --output "$WORK_DIR/lip_synced_raw.mp4" \
-                            --work-dir "$WORK_DIR" \
-                            --force
-                    else
-                        bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
-                            --config "$CONFIG" \
-                            --profile "$PROFILE" \
-                            --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
-                            --image "$HOST_RESIZED" \
-                            --audio "$WORK_DIR/audio.wav" \
-                            --output "$WORK_DIR/lip_synced_raw.mp4" \
-                            --work-dir "$WORK_DIR" \
-                            --resume
-                    fi
-                else
-                echo "🎬 使用本地 ComfyUI API 进行 InfiniteTalk 唇形同步（SSH 隧道）..."
-                GEN_ARGS=(
-                    --config "$CONFIG"
-                    --profile "$PROFILE"
-                    --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json"
-                    --image "$HOST_RESIZED"
-                    --audio "$WORK_DIR/audio.wav"
-                    --output "$WORK_DIR/lip_synced_raw.mp4"
-                    --work-dir "$WORK_DIR"
-                    --use-tunnel
-                )
-                if [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
-                    GEN_ARGS+=(--resume)
-                else
-                    echo "🧹 FORCE_LIPSYNC=1，清除已有分段缓存"
-                    rm -f "$WORK_DIR"/lip_synced_raw_seg*.mp4
+                if [ ! -s "$HOST_RESIZED" ]; then
+                    echo "🖼️  缩放主播照片..."
+                    resize_host_image "$PROJECT_DIR/$HOST_PHOTO" "$HOST_RESIZED"
                 fi
-                python3 "$PROJECT_DIR/scripts/comfyui/generate_segments.py" "${GEN_ARGS[@]}"
-            fi
-        else
-            echo "🎬 使用 InfiniteTalk CLI 进行唇形同步..."
-            bash "$PROJECT_DIR/scripts/infinitetalk.sh" "$HOST_RESIZED" "$WORK_DIR/audio.wav" "$WORK_DIR/lip_synced_raw.mp4"
-        fi
-    fi
-    mark_completed "$WORK_DIR" lipsync "$WORK_DIR/lip_synced_raw.mp4"
-    monitor_phase "infinitetalk" "completed" "InfiniteTalk 原始结果已就绪" "$(jq -cn --arg rawVideo "$WORK_DIR/lip_synced_raw.mp4" '{rawVideoFile: $rawVideo}')"
+
+                if video_matches_audio "$WORK_DIR/lip_synced_raw.mp4" "$AUDIO_DURATION" && [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
+                    echo "♻️  复用已有 InfiniteTalk 原始结果: $WORK_DIR/lip_synced_raw.mp4"
+                else
+                    # Prefer ComfyUI API on primary server when available, fallback to CLI
+                    PRIMARY_IT_PATH=$(jq -r '.primary.infinitetalk_path // ""' "$CONFIG")
+                    if [ -n "$PRIMARY_IT_PATH" ] && [ "$PRIMARY_IT_PATH" != "null" ]; then
+                        USE_SERVER_SIDE=$(jq -r '.primary.use_server_side // "true"' "$CONFIG")
+                        if [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "true" ] || [ "${PIPELINE_USE_SERVER_SIDE:-$USE_SERVER_SIDE}" = "1" ]; then
+                            echo "🎬 使用服务器端 ComfyUI API 进行 InfiniteTalk 唇形同步（无本地 SSH 隧道）..."
+                            if [ "${FORCE_LIPSYNC:-0}" = "1" ]; then
+                                echo "🧹 FORCE_LIPSYNC=1，强制重新生成，清除已有分段缓存与旧输出"
+                                rm -f "$WORK_DIR"/lip_synced_raw_seg*.mp4
+                                rm -f "$WORK_DIR"/lip_synced_raw.mp4
+                                bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
+                                    --config "$CONFIG" \
+                                    --profile "$PROFILE" \
+                                    --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
+                                    --image "$HOST_RESIZED" \
+                                    --audio "$WORK_DIR/audio.wav" \
+                                    --output "$WORK_DIR/lip_synced_raw.mp4" \
+                                    --work-dir "$WORK_DIR" \
+                                    --force
+                            else
+                                bash "$PROJECT_DIR/scripts/comfyui/run_server_side.sh" \
+                                    --config "$CONFIG" \
+                                    --profile "$PROFILE" \
+                                    --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json" \
+                                    --image "$HOST_RESIZED" \
+                                    --audio "$WORK_DIR/audio.wav" \
+                                    --output "$WORK_DIR/lip_synced_raw.mp4" \
+                                    --work-dir "$WORK_DIR" \
+                                    --resume
+                            fi
+                        else
+                            echo "🎬 使用本地 ComfyUI API 进行 InfiniteTalk 唇形同步（SSH 隧道）..."
+                            GEN_ARGS=(
+                                --config "$CONFIG"
+                                --profile "$PROFILE"
+                                --workflow "$PROJECT_DIR/scripts/comfyui/workflow_prompt.json"
+                                --image "$HOST_RESIZED"
+                                --audio "$WORK_DIR/audio.wav"
+                                --output "$WORK_DIR/lip_synced_raw.mp4"
+                                --work-dir "$WORK_DIR"
+                                --use-tunnel
+                            )
+                            if [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
+                                GEN_ARGS+=(--resume)
+                            else
+                                echo "🧹 FORCE_LIPSYNC=1，清除已有分段缓存"
+                                rm -f "$WORK_DIR"/lip_synced_raw_seg*.mp4
+                            fi
+                            python3 "$PROJECT_DIR/scripts/comfyui/generate_segments.py" "${GEN_ARGS[@]}"
+                        fi
+                    else
+                        echo "🎬 使用 InfiniteTalk CLI 进行唇形同步..."
+                        bash "$PROJECT_DIR/scripts/infinitetalk.sh" "$HOST_RESIZED" "$WORK_DIR/audio.wav" "$WORK_DIR/lip_synced_raw.mp4"
+                    fi
+                fi
+                ;;
+
+            musetalk)
+                HOST_VIDEO=$(jq -r '.host.video_source // ""' "$PROFILE")
+                if [ -z "$HOST_VIDEO" ] || [ "$HOST_VIDEO" = "null" ]; then
+                    echo "❌ 使用 MuseTalk 时必须配置 host.video_source" >&2
+                    exit 1
+                fi
+                HOST_VIDEO_PATH="$PROJECT_DIR/$HOST_VIDEO"
+                if [ ! -f "$HOST_VIDEO_PATH" ]; then
+                    echo "❌ 主播模板视频不存在: $HOST_VIDEO_PATH" >&2
+                    exit 1
+                fi
+
+                if video_matches_audio "$WORK_DIR/lip_synced_raw.mp4" "$AUDIO_DURATION" && [ "${FORCE_LIPSYNC:-0}" != "1" ]; then
+                    echo "♻️  复用已有 MuseTalk 原始结果: $WORK_DIR/lip_synced_raw.mp4"
+                else
+                    echo "🎬 使用 MuseTalk CLI 进行唇形同步..."
+                    bash "$PROJECT_DIR/scripts/musetalk.sh" "$HOST_VIDEO_PATH" "$WORK_DIR/audio.wav" "$WORK_DIR/lip_synced_raw.mp4"
+                fi
+                ;;
+
+            *)
+                echo "❌ 未知的唇形同步引擎: $LIPSYNC_ENGINE" >&2
+                exit 1
+                ;;
+        esac
+
+        mark_completed "$WORK_DIR" lipsync "$WORK_DIR/lip_synced_raw.mp4"
+        monitor_phase "lipsync" "completed" "$LIPSYNC_ENGINE 原始结果已就绪" "$(jq -cn --arg engine "$LIPSYNC_ENGINE" --arg rawVideo "$WORK_DIR/lip_synced_raw.mp4" '{engine: $engine, rawVideoFile: $rawVideo}')"
     fi
 
     CURRENT_PHASE="postprocess"

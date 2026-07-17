@@ -320,11 +320,6 @@ const TalkingHeadVideo: React.FC<{
 
   return (
     <AbsoluteFill style={{ background: '#FAFAF7' }}>
-      {/* Audio starts after title card */}
-      <Sequence from={talkingStartFrame}>
-        <Html5Audio src={staticFile(audioPath)} />
-      </Sequence>
-
       {isTitleCard ? (
         <TitleCard
           title={title}
@@ -343,47 +338,52 @@ const TalkingHeadVideo: React.FC<{
           features={features}
         />
       ) : !isEndcard ? (
-        isProductLaunch ? (
-          <ProductLaunchLayout
-            audioPath={audioPath}
-            srtPath={srtPath}
-            subtitles={subtitles}
-            hostVideoPath={hostVideoPath}
-            sceneVisuals={sceneVisuals}
-            features={features}
-            theme={theme}
-            primaryColor={primaryColor}
-            secondaryColor={secondaryColor}
-          />
-        ) : isHybrid ? (
-          <PortraitHybridLayout
-            audioPath={audioPath}
-            srtPath={srtPath}
-            subtitles={subtitles}
-            hostVideoPath={hostVideoPath}
-            sceneVisuals={sceneVisuals}
-            contentOverlay={contentOverlay}
-            primaryColor={primaryColor}
-            secondaryColor={secondaryColor}
-            brand={brand}
-            tagline={tagline}
-            title={title}
-            chapters={chapters}
-            hybridConfig={videoLayout.hybrid}
-          />
-        ) : (
-          <TalkingHeadClassicLayout
-            srtPath={srtPath}
-            subtitles={subtitles}
-            hostVideoPath={hostVideoPath}
-            sceneVisuals={sceneVisuals}
-            dataBars={dataBars}
-            quoteHighlight={quoteHighlight}
-            contentOverlay={contentOverlay}
-            primaryColor={primaryColor}
-            secondaryColor={secondaryColor}
-          />
-        )
+        // Wrap audio and host video layouts in the same Sequence so they share
+        // a relative timeline starting at media time 0.
+        <Sequence from={talkingStartFrame}>
+          <Html5Audio src={staticFile(audioPath)} />
+          {isProductLaunch ? (
+            <ProductLaunchLayout
+              audioPath={audioPath}
+              srtPath={srtPath}
+              subtitles={subtitles}
+              hostVideoPath={hostVideoPath}
+              sceneVisuals={sceneVisuals}
+              features={features}
+              theme={theme}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+            />
+          ) : isHybrid ? (
+            <PortraitHybridLayout
+              audioPath={audioPath}
+              srtPath={srtPath}
+              subtitles={subtitles}
+              hostVideoPath={hostVideoPath}
+              sceneVisuals={sceneVisuals}
+              contentOverlay={contentOverlay}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+              brand={brand}
+              tagline={tagline}
+              title={title}
+              chapters={chapters}
+              hybridConfig={videoLayout.hybrid}
+            />
+          ) : (
+            <TalkingHeadClassicLayout
+              srtPath={srtPath}
+              subtitles={subtitles}
+              hostVideoPath={hostVideoPath}
+              sceneVisuals={sceneVisuals}
+              dataBars={dataBars}
+              quoteHighlight={quoteHighlight}
+              contentOverlay={contentOverlay}
+              primaryColor={primaryColor}
+              secondaryColor={secondaryColor}
+            />
+          )}
+        </Sequence>
       ) : (
         <ProductEndcard
           startFrame={endcardStartFrame}

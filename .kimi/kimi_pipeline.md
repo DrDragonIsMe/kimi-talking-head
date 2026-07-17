@@ -10,7 +10,7 @@
                                             ↓
 分镜脚本 + 场景画面 ←──────────────────────┘
                                             ↓
-InfiniteTalk 唇形同步 → Remotion 合成 → MP4 + 封面
+InfiniteTalk / MuseTalk 唇形同步 → Remotion 合成 → MP4 + 封面
 ```
 
 ## 2. 首次配置
@@ -27,8 +27,10 @@ cp .env.example                     .env          # 填 API key
 
 在 `config/host_profile.json` 中配置：
 
-- `host.photo_source`：主播照片路径
+- `host.photo_source`：主播照片路径（InfiniteTalk 使用）
+- `host.video_source`：主播模板视频路径（MuseTalk 使用，如 `assets/host/me.mp4`）
 - `voice.reference_audio`：声音克隆参考音频
+- `lipsync.engine`：`infinitetalk` 或 `musetalk`，默认 `infinitetalk`
 - `template`：`editorial` 或 `product-launch`
 - `video_layout.hybrid.preset`：布局预设
 
@@ -91,11 +93,15 @@ cd /tmp/kimi-talking-head/server
 bash install.sh
 ```
 
+`install.sh` 会自动安装 ComfyUI + InfiniteTalk、IndexTTS 与 MuseTalk。当系统盘空间不足时，MuseTalk 会被安装到空间充足的数据盘（`/data`、`/mnt/data`、`/mnt` 或 `/home/data`）。
+
 然后按 [`server/MODEL_CHECKLIST.md`](../server/MODEL_CHECKLIST.md) 放置模型权重，再启动：
 
 ```bash
 bash /root/aigc_apps/start.sh
 ```
+
+> 注意：MuseTalk 默认以 CLI 方式运行，不需要启动额外服务；只需要服务器上已安装并配置好路径即可。
 
 服务器端脚本已全部纳入本仓库 `server/` 目录，部署后不要再在 `/root/aigc_apps/InfiniteTalk` 内执行 `git` 操作（会出现 dubious ownership 警告）。
 
@@ -116,6 +122,8 @@ bash /root/aigc_apps/start.sh
 | ComfyUI numpy/opencv 报错 | 服务器执行 `pip install "numpy<2.2" "opencv-python>=4.10"` |
 | SSH 连接失败 | 检查 `~/.ssh/config`，运行 `bash scripts/check_server.sh` |
 | 服务器 git 报 `detected dubious ownership` | 不要在该目录操作 git，自定义脚本在本地 `server/` 维护 |
+| MuseTalk 人脸检测失败 | 确保 `host.video_source` 视频为正面、清晰、无遮挡人脸；检查 `models/mmdet/` 与 `models/mmpose/` 权重是否就位 |
+| MuseTalk `mmcv` / `mmdet` 导入报错 | 在 MuseTalk venv 中重新安装：`mim install "mmcv==2.0.1" mmdet==3.1.0 mmpose==1.1.0` |
 
 ## 8. 常用命令
 

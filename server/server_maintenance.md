@@ -12,6 +12,11 @@ For the GPU server running ComfyUI/InfiniteTalk and IndexTTS.
 │   ├── models/             # model weights (large, symlinked)
 │   ├── input/ output/
 │   └── main.py
+├── MuseTalk/               # MuseTalk repo (may be on a data disk)
+│   ├── venv/               # MuseTalk Python venv
+│   ├── models/             # MuseTalk model weights
+│   ├── scripts/inference.py
+│   └── configs/inference/
 ├── index-tts/              # IndexTTS2 repo + remote_worker.py
 │   ├── .venv/              # IndexTTS Python venv
 │   └── checkpoints/        # model weights
@@ -51,15 +56,22 @@ If GPU util is 0% for a long time while a job is queued, check the ComfyUI log f
 
 The current server places large weights under `/wuying-pub/Comfyui/...` and symlinks them into `/root/aigc_apps/InfiniteTalk/models/`. Do **not** copy weights into this repo; keep symlinks.
 
+MuseTalk weights live under the MuseTalk install directory (e.g. `/root/aigc_apps/MuseTalk/models/`). On servers where MuseTalk is installed on a data disk, the path will be `<data-disk>/aigc_apps/MuseTalk/models/`.
+
 If `install.sh` is run on a fresh server, place weights manually according to `MODEL_CHECKLIST.md` or re-create symlinks to your shared storage.
 
 ## Re-install after code update
 
-If `InfiniteTalk` or `IndexTTS` release a required update:
+If `InfiniteTalk`, `IndexTTS`, or `MuseTalk` release a required update:
 
 ```bash
 cd /root/aigc_apps/InfiniteTalk/custom_nodes/InfiniteTalk
 git pull
+
+# MuseTalk is installed alongside InfiniteTalk
+cd /root/aigc_apps/MuseTalk  # or the data-disk path used during install
+git pull
+
 # or re-run the full installer
 bash /tmp/kimi-talking-head/server/install.sh
 ```
@@ -88,5 +100,7 @@ EOF
 |---|---|
 | `numpy` / `opencv` import error | In ComfyUI venv: `pip install "numpy<2.2" "opencv-python>=4.10"` |
 | OOM during lip-sync | Lower `sample_steps`, enable `low_vram`, or increase `blocks_to_swap` in `config/host_profile.json` |
+| MuseTalk face not detected | Ensure `host.video_source` is a clear frontal face video; verify `models/mmdet/retinaface_r50.pth` and `models/mmpose/face-landmarks.pth` exist. |
+| MuseTalk `mmcv` / `mmdet` version mismatch | In the MuseTalk venv: `mim install "mmcv==2.0.1" mmdet==3.1.0 mmpose==1.1.0` |
 | `detected dubious ownership` in git | Do not run `git` inside `/root/aigc_apps/InfiniteTalk` as a different user. Keep custom scripts in this repo (`server/`) instead. |
 | SSH key denied from local Mac | Ensure `~/.ssh/config` uses the right user/port and `ssh -p <port> root@<server>` works. |

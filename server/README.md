@@ -6,7 +6,8 @@ This directory contains everything needed to deploy the GPU server side of `kimi
 
 | Service | Path on server | Purpose |
 |---------|----------------|---------|
-| ComfyUI + InfiniteTalk | `/root/aigc_apps/InfiniteTalk` | Lip-sync video generation (`lip_synced_raw.mp4`) |
+| ComfyUI + InfiniteTalk | `/root/aigc_apps/InfiniteTalk` | Lip-sync video generation (`lip_synced_raw.mp4`) via InfiniteTalk |
+| MuseTalk | `/root/aigc_apps/MuseTalk` (or `<data-disk>/aigc_apps/MuseTalk`) | Lip-sync video generation (`lip_synced_raw.mp4`) via MuseTalk |
 | IndexTTS + remote worker | `/root/aigc_apps/index-tts` | Voice-cloned TTS audio (`audio.wav`) |
 
 The local Mac console orchestrates everything: it uploads images/audio, submits remote jobs, downloads results, and renders the final video with Remotion.
@@ -28,7 +29,8 @@ bash install.sh
 4. Install custom nodes: `InfiniteTalk`, `ComfyUI-WanVideoWrapper`, `ComfyUI-VideoHelperSuite`, `ComfyUI-KJNodes`, `ComfyUI-Manager`.
 5. Clone/refresh IndexTTS into `/root/aigc_apps/index-tts` and install it in a Python 3.10 venv.
 6. Copy our `remote_worker.py` wrapper into the IndexTTS root.
-7. Copy `start.sh` / `env.sh` to `/root/aigc_apps/` and create standard symlinks.
+7. Clone/refresh MuseTalk into `/root/aigc_apps/MuseTalk` (or a data disk if system disk is full) and install its Python 3.10 venv with PyTorch + MMLab dependencies.
+8. Copy `start.sh` / `env.sh` to `/root/aigc_apps/` and create standard symlinks.
 
 ## Download models
 
@@ -75,6 +77,18 @@ bash scripts/detect_paths.sh
 
 This updates `config/servers.json` with the detected server paths. Copy `config/servers.example.json` to `config/servers.json` first if needed.
 
+## MuseTalk vs InfiniteTalk
+
+The local pipeline chooses the engine via `config/host_profile.json`:
+
+```json
+{
+  "lipsync": { "engine": "infinitetalk" }
+}
+```
+
+Set it to `"musetalk"` to use MuseTalk. MuseTalk requires `host.video_source` (a template video such as `assets/host/me.mp4`) instead of a static photo.
+
 ## Operations
 
 Day-to-day runbooks (restarts, log locations, health checks, model symlinks) are in [`server_maintenance.md`](server_maintenance.md).
@@ -87,6 +101,7 @@ Day-to-day runbooks (restarts, log locations, health checks, model symlinks) are
 | `MODEL_CHECKLIST.md` | Required model files and locations |
 | `server_maintenance.md` | Operational runbooks |
 | `comfyui/start.sh` | ComfyUI startup script copied to `/root/aigc_apps/start.sh` |
+| `comfyui/env.sh` | Environment helper copied to `/root/aigc_apps/env.sh` |
 | `comfyui/env.sh` | Environment helper copied to `/root/aigc_apps/env.sh` |
 | `comfyui/monitor.sh` | Optional remote-job monitor |
 | `comfyui/README.md` | ComfyUI server scripts doc |

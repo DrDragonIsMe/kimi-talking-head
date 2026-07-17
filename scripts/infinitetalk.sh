@@ -63,9 +63,9 @@ else
 fi
 
 # 激活 conda 环境时需要先 source conda.sh
-if echo "$INFINITE_VENV" | grep -qE "^(source|/)"; then
+if echo "$INFINITE_VENV" | grep -qE "^source"; then
     ACTIVATE_CMD="$INFINITE_VENV"
-elif [ -f "$INFINITE_VENV" ]; then
+elif [ -f "$INFINITE_VENV" ] || echo "$INFINITE_VENV" | grep -qE "^/"; then
     ACTIVATE_CMD="source $INFINITE_VENV"
 else
     # 视为 conda 环境名

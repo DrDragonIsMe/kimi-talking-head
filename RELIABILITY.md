@@ -28,10 +28,10 @@ Before any run, the pipeline validates:
 
 ## 4. GPU Server Operations
 
-- `server/setup_infinitetalk.sh` installs InfiniteTalk from `MeiGen-AI/InfiniteTalk`.
-- `server/setup_index_tts.sh` installs IndexTTS from `IndexTTS/IndexTTS`.
+- `server/install.sh` installs ComfyUI + InfiniteTalk, IndexTTS, and MuseTalk on a fresh GPU server.
 - `server/server_maintenance.md` contains day-to-day runbooks.
 - Model weights are documented in [`server/MODEL_CHECKLIST.md`](server/MODEL_CHECKLIST.md); they are loaded via symlinks and are never committed.
+- The local engine is selected in `config/host_profile.json` via `lipsync.engine` (`infinitetalk` or `musetalk`).
 
 ## 5. Reuse Without Regeneration
 
@@ -57,7 +57,9 @@ This reuses the original `script.txt` and `subtitles_raw.json` so audio and subt
 | Symptom | Action |
 |---|---|
 | `detected dubious ownership` in server git | Do not commit from the server; keep server-side scripts in `server/` in this repo. |
-| InfiniteTalk install fails | Re-run `server/setup_infinitetalk.sh`; check CUDA/PyTorch match. |
+| InfiniteTalk install fails | Re-run `server/install.sh`; check CUDA/PyTorch match. |
+| MuseTalk install fails | Check system/data disk space (≥25 GB); verify `mmcv==2.0.1`, `mmdet==3.1.0`, `mmpose==1.1.0` install against the chosen PyTorch/CUDA version. |
+| MuseTalk face detection fails | Use a clear frontal-face template video for `host.video_source`; verify detection/landmark weights in `models/mmdet/` and `models/mmpose/`. |
 | Subtitle match < 65% | Verify script matches audio; re-run Whisper or regenerate script. |
 | Render OOM / fails | Reduce `REMOTION_PARALLEL` and ensure output directory has space. |
 
@@ -66,7 +68,8 @@ This reuses the original `script.txt` and `subtitles_raw.json` so audio and subt
 For a brand-new GPU server:
 
 1. Copy SSH key and set `config/servers.json` host/user/port.
-2. Run `bash server/setup_infinitetalk.sh` and `bash server/setup_index_tts.sh` on the server.
+2. Run `bash server/install.sh` on the server.
 3. Follow `server/MODEL_CHECKLIST.md` to place weights and create symlinks.
-4. Run `bash scripts/check_server.sh`.
-5. Run a short end-to-end test video.
+4. Run `bash scripts/detect_paths.sh` on the local Mac.
+5. Run `bash scripts/check_server.sh`.
+6. Run a short end-to-end test video.

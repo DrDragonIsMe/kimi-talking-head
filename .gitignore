@@ -25,6 +25,10 @@ public/subtitles.srt
 public/props.json
 public/scene_visuals/
 
+# Host video templates (large binary assets, keep photo sources in git)
+assets/host/*.mp4
+assets/host/*.mov
+
 # Python cache
 __pycache__/
 *.py[cod]

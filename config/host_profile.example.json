@@ -2,6 +2,7 @@
   "host": {
     "name": "默认主播",
     "photo_source": "assets/host/me.jpg",
+    "video_source": "assets/host/me.mp4",
     "position": "center",
     "display_size": { "width": 720, "height": 960 },
     "border_radius": 24
@@ -13,6 +14,9 @@
     "pitch": 0,
     "emotion": "neutral",
     "format": "wav"
+  },
+  "lipsync": {
+    "engine": "infinitetalk"
   },
   "infinitetalk": {
     "enable": true,
@@ -30,6 +34,16 @@
     "crossfade_duration": 0,
     "max_retries": 1,
     "keep_segments": false
+  },
+  "musetalk": {
+    "enable": true,
+    "version": "v15",
+    "bbox_shift": 0,
+    "fps": 25,
+    "batch_size": 1,
+    "max_retries": 3,
+    "remote_poll_interval": 30,
+    "remote_max_poll_minutes": 180
   },
   "product": {
     "brand": "薪灵AI",
@@ -166,13 +180,13 @@
       "showQuoteHighlight": false,
       "topicTag": {
         "enabled": true,
-        "label": "薪人薪事 CEO",
+        "label": "薪灵AI",
         "position": "top-left"
       },
       "brandBadge": {
         "enabled": true,
         "position": "bottom-right",
-        "text": "薪灵AI"
+        "text": "薪人薪事 CEO"
       }
     }
   },
