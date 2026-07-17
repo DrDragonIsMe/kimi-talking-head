@@ -68,6 +68,7 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
           alignItems: 'center',
           paddingBottom: 160,
           pointerEvents: 'none',
+          zIndex: 20, // 必须高于 FallingChapterCards 的 zIndex:12，否则 hero/字幕被章节卡遮挡
         }}
       >
         {words.length > 0 ? (
@@ -156,6 +157,7 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
             justifyContent: 'center',
             alignItems: 'center',
             pointerEvents: 'none',
+            zIndex: 20,
           }}
         >
           <AbsoluteFill

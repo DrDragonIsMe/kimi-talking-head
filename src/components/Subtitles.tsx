@@ -121,6 +121,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
         paddingLeft: isHybridBottom ? 0 : overlayLayout.subtitles.left,
         paddingBottom: isHybridBottom ? 0 : 0,
         pointerEvents: 'none',
+        zIndex: 20, // 高于 FallingChapterCards 的 zIndex:12，避免字幕被章节卡遮挡
       }}
     >
       <div style={{ width: isHybridBottom ? 960 : overlayLayout.subtitles.width, marginBottom: isHybridBottom ? 160 : 0 }}>
