@@ -3,6 +3,7 @@ import { interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remoti
 import { useSubtitles, SubtitleCue } from '../hooks/useSubtitles';
 import { matchSceneStyle, extractTalkingPoints } from '../utils/keywordMatcher';
 import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
+import { getSceneWindow, getKenBurnsTransform } from '../utils/sceneMotion';
 import { ChartLines } from './effects/ChartLines';
 import { PulseWarning } from './effects/PulseWarning';
 import { GridFlow } from './effects/GridFlow';
@@ -56,24 +57,27 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
     ? extractTalkingPoints(currentCue.text, style, 1)[0] || style.label
     : '趋势';
   const baseColor = style ? style.bgColor : '#FAFAF7';
-  const activeVisual = sceneVisuals.find(
-    (item) => currentTime >= item.start && currentTime < item.end
-  ) || sceneVisuals[sceneVisuals.length - 1] || null;
-  const sceneProgress = activeVisual
-    ? (currentTime - activeVisual.start) / Math.max(0.1, activeVisual.end - activeVisual.start)
-    : 0;
+  const sceneWindow = getSceneWindow(sceneVisuals, currentTime);
+  const activeVisual = sceneWindow.current;
+  const kenBurns = activeVisual
+    ? getKenBurnsTransform(sceneWindow.index, sceneWindow.sceneProgress)
+    : null;
+  const previousKenBurns = sceneWindow.previous
+    ? getKenBurnsTransform(sceneWindow.index - 1, 1)
+    : null;
+
+  const kenBurnsCss = (t: { scale: number; translateX: number; translateY: number }) =>
+    `scale(${t.scale}) translate(${t.translateX}%, ${t.translateY}%)`;
+
+  // hero 变体：交叉淡化窗口内双图叠加；其余时间单图。
+  // default 变体保持原有透明度呼吸，仅叠加 Ken Burns 运动。
+  const sceneProgress = sceneWindow.sceneProgress;
   const visualOpacity = activeVisual
     ? interpolate(sceneProgress, [0, 0.08, 0.92, 1], [0.58, 0.92, 0.92, 0.64], {
         extrapolateLeft: 'clamp',
         extrapolateRight: 'clamp',
       })
     : 0;
-  const visualScale = activeVisual
-    ? interpolate(sceneProgress, [0, 1], [1.04, 1.0], {
-        extrapolateLeft: 'clamp',
-        extrapolateRight: 'clamp',
-      })
-    : 1;
 
   return (
     <div style={{
@@ -137,14 +141,32 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
       >
         {activeVisual ? (
           <>
+            {isHero && sceneWindow.previous && previousKenBurns ? (
+              <img
+                src={staticFile(sceneWindow.previous.path)}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  opacity: 1 - sceneWindow.crossfadeProgress,
+                  transform: kenBurnsCss(previousKenBurns),
+                  transformOrigin: 'center center',
+                  filter: 'contrast(1.02) saturate(0.95)',
+                }}
+              />
+            ) : null}
             <img
               src={staticFile(activeVisual.path)}
               style={{
+                position: isHero && sceneWindow.previous ? 'absolute' : undefined,
+                inset: isHero && sceneWindow.previous ? 0 : undefined,
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
-                opacity: visualOpacity,
-                transform: `scale(${visualScale})`,
+                opacity: isHero ? 0.95 * sceneWindow.crossfadeProgress : visualOpacity,
+                transform: kenBurns ? kenBurnsCss(kenBurns) : undefined,
                 transformOrigin: 'center center',
                 filter: 'contrast(1.02) saturate(0.95)',
               }}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Composition, AbsoluteFill, OffthreadVideo, Html5Audio, staticFile, useCurrentFrame, registerRoot, Sequence } from 'remotion';
+import { Composition, AbsoluteFill, OffthreadVideo, Html5Audio, staticFile, useCurrentFrame, useVideoConfig, registerRoot, Sequence } from 'remotion';
 import { DynamicBackground } from './components/DynamicBackground';
 import { Subtitles } from './components/Subtitles';
 import { TalkingPoints } from './components/TalkingPoints';
@@ -67,6 +67,7 @@ export interface VideoLayoutConfig {
     showSubtitles?: boolean;
     showTalkingPoints?: boolean;
     showProgressBreadcrumb?: boolean;
+    showProgressBar?: boolean;
     showChapterCards?: boolean;
     showDataBars?: boolean;
     showQuoteHighlight?: boolean;
@@ -218,6 +219,10 @@ export const RemotionRoot: React.FC = () => {
           quoteHighlight: null,
           chapters: [],
           heroMoments: [],
+          bgmPath: null,
+          bgmVolume: 0,
+          sfxHeroPath: null,
+          sfxVolume: 0.5,
           contentOverlay: DEFAULT_CONTENT_OVERLAY,
           videoLayout: {
             mode: 'portrait-hybrid',
@@ -276,6 +281,12 @@ const TalkingHeadVideo: React.FC<{
   quoteHighlight: QuoteHighlightData | null;
   chapters?: Chapter[];
   heroMoments?: HeroMoment[];
+  /** BGM 在 public/ 下的相对路径；null 表示不启用 */
+  bgmPath?: string | null;
+  bgmVolume?: number;
+  /** hero 入场音效在 public/ 下的相对路径；null 表示不启用 */
+  sfxHeroPath?: string | null;
+  sfxVolume?: number;
   contentOverlay?: ContentOverlayConfig;
   videoLayout?: VideoLayoutConfig;
   template?: VideoTemplate;
@@ -304,16 +315,22 @@ const TalkingHeadVideo: React.FC<{
   quoteHighlight,
   chapters,
   heroMoments = [],
+  bgmPath = null,
+  bgmVolume = 0,
+  sfxHeroPath = null,
+  sfxVolume = 0.5,
   contentOverlay = DEFAULT_CONTENT_OVERLAY,
   videoLayout = { mode: 'talking-head' },
   template = 'editorial',
   titleCardDurationFrames,
   talkingDurationFrames,
   endcardDurationFrames,
+  totalDurationFrames,
   primaryColor,
   secondaryColor,
 }) => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const talkingStartFrame = titleCardDurationFrames;
   const endcardStartFrame = talkingStartFrame + talkingDurationFrames;
 
@@ -325,6 +342,18 @@ const TalkingHeadVideo: React.FC<{
 
   return (
     <AbsoluteFill style={{ background: '#FAFAF7' }}>
+      {bgmPath ? (
+        <Html5Audio
+          src={staticFile(bgmPath)}
+          loop
+          volume={(f) => {
+            const base = Math.max(0, Math.min(1, bgmVolume));
+            const fadeIn = Math.min(1, f / 30);
+            const fadeOut = Math.min(1, Math.max(0, (totalDurationFrames - f) / 60));
+            return base * fadeIn * fadeOut;
+          }}
+        />
+      ) : null}
       {isTitleCard ? (
         <TitleCard
           title={title}
@@ -347,6 +376,16 @@ const TalkingHeadVideo: React.FC<{
         // a relative timeline starting at media time 0.
         <Sequence from={talkingStartFrame}>
           <Html5Audio src={staticFile(audioPath)} />
+          {sfxHeroPath
+            ? heroMoments.map((moment, index) => (
+                <Sequence
+                  key={`hero-sfx-${index}`}
+                  from={Math.max(0, Math.round(moment.start * fps))}
+                >
+                  <Html5Audio src={staticFile(sfxHeroPath)} volume={sfxVolume} />
+                </Sequence>
+              ))
+            : null}
           {isProductLaunch ? (
             <ProductLaunchLayout
               audioPath={audioPath}
@@ -374,6 +413,7 @@ const TalkingHeadVideo: React.FC<{
               title={title}
               chapters={chapters}
               heroMoments={heroMoments}
+              talkingDurationFrames={talkingDurationFrames}
               hybridConfig={videoLayout.hybrid}
             />
           ) : (

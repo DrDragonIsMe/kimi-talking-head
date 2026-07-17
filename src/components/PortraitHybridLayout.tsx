@@ -6,6 +6,7 @@ import { TopicTag } from './TopicTag';
 import { BrandBadge } from './BrandBadge';
 import { HybridInsightCard } from './HybridInsightCard';
 import { FallingChapterCards } from './FallingChapterCards';
+import { TalkingProgressBar } from './TalkingProgressBar';
 import { SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
 import type { ContentOverlayConfig, SceneVisual } from '../index';
 
@@ -23,6 +24,8 @@ interface PortraitHybridLayoutProps {
   title: string;
   chapters?: Array<{ start: number; end: number; title: string }>;
   heroMoments?: HeroMoment[];
+  /** 正文（说话段）总帧数，用于底部进度条；不传则不渲染进度条 */
+  talkingDurationFrames?: number;
   hybridConfig?: {
     preset?: 'default' | 'host-focus' | 'visual-focus' | 'minimal' | 'balanced';
     mainVisualRatio?: number;
@@ -34,6 +37,7 @@ interface PortraitHybridLayoutProps {
     showSubtitles?: boolean;
     showTalkingPoints?: boolean;
     showProgressBreadcrumb?: boolean;
+    showProgressBar?: boolean;
     showChapterCards?: boolean;
     showDataBars?: boolean;
     showQuoteHighlight?: boolean;
@@ -140,6 +144,7 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
   hybridConfig: rawHybridConfig = {},
   chapters = [],
   heroMoments = [],
+  talkingDurationFrames,
 }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -308,6 +313,11 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
           variant="hybrid-bottom"
           heroMoments={heroMoments}
         />
+      ) : null}
+
+      {/* 底部线性进度条 */}
+      {hybridConfig.showProgressBar !== false && talkingDurationFrames ? (
+        <TalkingProgressBar durationFrames={talkingDurationFrames} />
       ) : null}
     </AbsoluteFill>
   );

@@ -644,6 +644,39 @@ if [ -s "$WORK_DIR/subtitles_words.json" ] && [ -s "$HERO_STORYBOARD_JSON" ]; th
     fi
 fi
 
+# BGM：style.bgm 存在且音量 > 0 时复制到 public 并注入 props
+BGM_PATH_JSON='null'
+BGM_VOLUME=$(jq -r '.style.bgm_volume // 0' "$PROFILE")
+BGM_SOURCE=$(jq -r '.style.bgm // ""' "$PROFILE")
+if [ -n "$BGM_SOURCE" ] && [ "$BGM_SOURCE" != "null" ] && [ -f "$PROJECT_DIR/$BGM_SOURCE" ] \
+    && awk "BEGIN{exit !($BGM_VOLUME > 0)}"; then
+    BGM_EXT="${BGM_SOURCE##*.}"
+    cp -f "$PROJECT_DIR/$BGM_SOURCE" "$PROJECT_DIR/public/bgm.$BGM_EXT"
+    BGM_PATH_JSON="\"bgm.$BGM_EXT\""
+    echo "🎵 BGM 已启用: $BGM_SOURCE (volume=$BGM_VOLUME)"
+fi
+
+# hero 音效：assets/sfx/hero.* 存在则用素材，否则 ffmpeg 合成兜底（失败不阻断）
+SFX_HERO_JSON='null'
+SFX_ENABLED=$(jq -r '.style.sfx_enabled // true' "$PROFILE")
+SFX_VOLUME=$(jq -r '.style.sfx_volume // 0.5' "$PROFILE")
+if [ "$SFX_ENABLED" = "true" ]; then
+    mkdir -p "$PROJECT_DIR/public/sfx"
+    if [ -f "$PROJECT_DIR/assets/sfx/hero.wav" ]; then
+        cp -f "$PROJECT_DIR/assets/sfx/hero.wav" "$PROJECT_DIR/public/sfx/hero.wav"
+        SFX_HERO_JSON='"sfx/hero.wav"'
+    elif [ -f "$PROJECT_DIR/assets/sfx/hero.mp3" ]; then
+        cp -f "$PROJECT_DIR/assets/sfx/hero.mp3" "$PROJECT_DIR/public/sfx/hero.mp3"
+        SFX_HERO_JSON='"sfx/hero.mp3"'
+    elif ffmpeg -y -loglevel error -f lavfi \
+        -i "aevalsrc='sin(2*PI*(600*exp(-t*10)+120)*t)*exp(-t*9)':s=44100:d=0.25" \
+        "$PROJECT_DIR/public/sfx/hero_pop.wav"; then
+        SFX_HERO_JSON='"sfx/hero_pop.wav"'
+    else
+        echo "⚠️  hero 音效合成失败，按无音效继续"
+    fi
+fi
+
 echo "🎬 标题卡: $VIDEO_TITLE"
 [ -n "$VIDEO_SUBTITLE" ] && echo "📝 副标题: $VIDEO_SUBTITLE"
 echo ""
@@ -684,6 +717,10 @@ cat > "$PROJECT_DIR/public/props.json" << EOF
   "dataBars": $DATA_BARS_JSON,
   "quoteHighlight": $QUOTE_HIGHLIGHT_JSON,
   "heroMoments": $HERO_MOMENTS_JSON,
+  "bgmPath": $BGM_PATH_JSON,
+  "bgmVolume": $BGM_VOLUME,
+  "sfxHeroPath": $SFX_HERO_JSON,
+  "sfxVolume": $SFX_VOLUME,
   "contentOverlay": $CONTENT_OVERLAY_JSON,
   "videoLayout": $VIDEO_LAYOUT_WITH_TEMPLATE,
   "template": "$TEMPLATE",
@@ -695,6 +732,9 @@ cat > "$PROJECT_DIR/public/props.json" << EOF
   "secondaryColor": "$(jq -r '.product.secondary_color' "$PROFILE")"
 }
 EOF
+
+# 渲染前 props 预检：结构/引用文件非法时在此终止，而不是渲染到一半才失败
+node "$PROJECT_DIR/scripts/validate_props.js" "$PROJECT_DIR/public/props.json"
 
 cd "$PROJECT_DIR"
 EXPECTED_DURATION=$(awk "BEGIN { printf \"%.3f\", $TOTAL_FRAMES / 30 }")

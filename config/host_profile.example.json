@@ -70,7 +70,10 @@
     "highlight_style": "neon",
     "highlight_color": "#00b498",
     "inactive_color": "rgba(255,255,255,0.35)",
+    "bgm": "assets/bgm/piano-reflections.mp3",
     "bgm_volume": 0.12,
+    "sfx_enabled": true,
+    "sfx_volume": 0.5,
     "endcard_duration_seconds": 6
   },
   "content_overlay": {
@@ -176,6 +179,7 @@
       "showSubtitles": true,
       "showTalkingPoints": false,
       "showProgressBreadcrumb": true,
+      "showProgressBar": true,
       "showChapterCards": true,
       "showDataBars": false,
       "showQuoteHighlight": false,
