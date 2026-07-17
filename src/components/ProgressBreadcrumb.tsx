@@ -76,7 +76,7 @@ export const ProgressBreadcrumb: React.FC<ProgressBreadcrumbProps> = ({
           borderRadius: 999,
           background: 'rgba(255,255,255,0.14)',
           overflow: 'hidden',
-          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.25)',
+          boxShadow: 'inset 0 1px 2px rgba(10,10,18,0.25)',
         }}
       >
         <div
@@ -101,7 +101,7 @@ export const ProgressBreadcrumb: React.FC<ProgressBreadcrumbProps> = ({
           border: `1px solid ${primaryColor}35`,
           backdropFilter: 'blur(14px) saturate(130%)',
           WebkitBackdropFilter: 'blur(14px) saturate(130%)',
-          boxShadow: `0 10px 28px rgba(0,0,0,0.25), 0 0 16px ${primaryColor}18`,
+          boxShadow: `0 10px 28px rgba(10,10,18,0.25), 0 0 16px ${primaryColor}18`,
         }}
       >
         <div
@@ -169,7 +169,7 @@ export const ProgressBreadcrumb: React.FC<ProgressBreadcrumbProps> = ({
                   ? `0 0 12px ${primaryColor}, 0 0 24px ${primaryColor}`
                   : isPast
                   ? `0 0 6px ${primaryColor}`
-                  : '0 1px 4px rgba(0,0,0,0.4)',
+                  : '0 1px 4px rgba(10,10,18,0.4)',
               }}
             />
           );

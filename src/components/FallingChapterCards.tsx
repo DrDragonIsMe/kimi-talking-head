@@ -1,5 +1,6 @@
 import React from 'react';
 import { useCurrentFrame, useVideoConfig, interpolate, Easing, spring } from 'remotion';
+import { inkAlpha, Z } from '../themes/tokens';
 
 export interface Chapter {
   start: number;
@@ -53,9 +54,9 @@ export const FallingChapterCards: React.FC<FallingChapterCardsProps> = ({
         [isRight ? 'right' : 'left']: 252,
         display: 'flex',
         flexDirection: 'column',
-        gap: 18,
+        gap: 16,
         pointerEvents: 'none',
-        zIndex: 12,
+        zIndex: Z.cards,
         width: cardWidth,
       }}
     >
@@ -96,17 +97,17 @@ export const FallingChapterCards: React.FC<FallingChapterCardsProps> = ({
             key={`${index}-${chapter.title}`}
             style={{
               width: cardWidth,
-              padding: '23px 28px',
-              borderRadius: 25,
+              padding: '24px 28px',
+              borderRadius: 24,
               background: isActive
-                ? `linear-gradient(135deg, rgba(10,10,18,0.72) 0%, rgba(10,10,18,0.58) 100%)`
-                : `rgba(10,10,18,0.58)`,
+                ? `linear-gradient(135deg, ${inkAlpha(0.72)} 0%, ${inkAlpha(0.58)} 100%)`
+                : inkAlpha(0.58),
               border: `1.5px solid ${isActive ? primaryColor : `${primaryColor}35`}`,
               backdropFilter: 'blur(18px) saturate(140%)',
               WebkitBackdropFilter: 'blur(18px) saturate(140%)',
               boxShadow: isActive
-                ? `0 14px 34px rgba(0,0,0,0.32), 0 0 24px ${primaryColor}${Math.round(glowOpacity * 255).toString(16).padStart(2, '0')}`
-                : `0 10px 24px rgba(0,0,0,0.25)`,
+                ? `0 14px 34px ${inkAlpha(0.32)}, 0 0 24px ${primaryColor}${Math.round(glowOpacity * 255).toString(16).padStart(2, '0')}`
+                : `0 10px 24px ${inkAlpha(0.25)}`,
               transform: `translateY(${yOffset}px) scale(${0.88 + scale * 0.12})`,
               opacity,
               transformOrigin: isRight ? 'right top' : 'left top',
@@ -116,15 +117,15 @@ export const FallingChapterCards: React.FC<FallingChapterCardsProps> = ({
               style={{
                 display: 'flex',
                 alignItems: 'flex-start',
-                gap: 15,
+                gap: 16,
               }}
             >
               <div
                 style={{
                   flexShrink: 0,
-                  width: 38,
-                  height: 38,
-                  borderRadius: 11,
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -136,7 +137,7 @@ export const FallingChapterCards: React.FC<FallingChapterCardsProps> = ({
                 <span
                   style={{
                     fontFamily: FONT_FAMILY,
-                    fontSize: 19,
+                    fontSize: 20,
                     fontWeight: 900,
                     color: isActive ? '#0a0a12' : primaryColor,
                   }}

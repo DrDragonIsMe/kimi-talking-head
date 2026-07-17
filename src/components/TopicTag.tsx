@@ -40,7 +40,7 @@ export const TopicTag: React.FC<TopicTagProps> = ({ label, currentTime, subtitle
           background: 'rgba(10,10,18,0.72)',
           border: `1.5px solid ${accentColor}60`,
           backdropFilter: 'blur(12px)',
-          boxShadow: `0 12px 32px rgba(0,0,0,0.25), 0 0 20px ${accentColor}18`,
+          boxShadow: `0 12px 32px rgba(10,10,18,0.25), 0 0 20px ${accentColor}18`,
         }}
       >
         <div

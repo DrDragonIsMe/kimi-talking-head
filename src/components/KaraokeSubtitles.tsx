@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, Easing } from 'remotion';
 import type { SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
 import type { CaptionDna } from '../themes/captions';
+import { inkAlpha, Z } from '../themes/tokens';
 
 interface KaraokeSubtitlesProps {
   cue: SubtitleCue | null;
@@ -68,23 +69,23 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
           alignItems: 'center',
           paddingBottom: 160,
           pointerEvents: 'none',
-          zIndex: 20, // 必须高于 FallingChapterCards 的 zIndex:12，否则 hero/字幕被章节卡遮挡
+          zIndex: Z.captions, // 必须高于 FallingChapterCards 的 cards 层，否则 hero/字幕被章节卡遮挡
         }}
       >
         {words.length > 0 ? (
           <div
             style={{
               width: 920,
-              padding: '20px 36px 30px',
+              padding: '24px 36px 32px',
               background: colors.cardBackground,
               borderRadius: 24,
               border: `1px solid ${colors.cardBorder}`,
-              boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
+              boxShadow: `0 24px 60px ${inkAlpha(0.55)}`,
               opacity: captionOpacity,
               display: 'flex',
               flexWrap: 'wrap',
               justifyContent: 'center',
-              rowGap: 14,
+              rowGap: 16,
             }}
           >
             {words.map((word, index) => {
@@ -139,7 +140,7 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
                     textShadow:
                       isCurrent && motion.currentGlow > 0
                         ? `0 0 ${Math.round(28 * motion.currentGlow)}px ${colors.accent}`
-                        : '0 2px 18px rgba(0,0,0,0.6)',
+                        : `0 2px 18px ${inkAlpha(0.6)}`,
                     whiteSpace: 'nowrap',
                   }}
                 >
@@ -157,12 +158,14 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
             justifyContent: 'center',
             alignItems: 'center',
             pointerEvents: 'none',
-            zIndex: 20,
+            zIndex: Z.hero,
           }}
         >
           <AbsoluteFill
             style={{
-              background: `rgba(0,0,0,${(heroDna.scrimOpacity * heroProgress * (1 - heroExit)).toFixed(3)})`,
+              background: inkAlpha(
+                Number((heroDna.scrimOpacity * heroProgress * (1 - heroExit)).toFixed(3))
+              ),
             }}
           />
           <HeroText dna={dna} hero={hero} progress={heroProgress} exit={heroExit} currentTime={currentTime} />
@@ -221,8 +224,8 @@ const HeroText: React.FC<{
         clipPath,
         textShadow:
           heroDna.glow > 0
-            ? `0 0 ${Math.round(60 * heroDna.glow)}px ${dna.colors.accent}, 0 4px 30px rgba(0,0,0,0.8)`
-            : '0 4px 30px rgba(0,0,0,0.8)',
+            ? `0 0 ${Math.round(60 * heroDna.glow)}px ${dna.colors.accent}, 0 4px 30px ${inkAlpha(0.8)}`
+            : `0 4px 30px ${inkAlpha(0.8)}`,
       }}
     >
       {hero.text}

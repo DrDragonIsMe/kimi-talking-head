@@ -5,6 +5,7 @@ import { matchSceneStyle, extractHighlightWords, formatSubtitleLines, normalizeD
 import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
 import { getCaptionDna } from '../themes/captions';
 import { KaraokeSubtitles } from './KaraokeSubtitles';
+import { inkAlpha, Z } from '../themes/tokens';
 import type { ContentOverlayConfig } from '../index';
 
 const CREAM = '#FAFAF7';
@@ -121,7 +122,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
         paddingLeft: isHybridBottom ? 0 : overlayLayout.subtitles.left,
         paddingBottom: isHybridBottom ? 0 : 0,
         pointerEvents: 'none',
-        zIndex: 20, // 高于 FallingChapterCards 的 zIndex:12，避免字幕被章节卡遮挡
+        zIndex: Z.captions, // 高于 FallingChapterCards 的 cards 层，避免字幕被章节卡遮挡
       }}
     >
       <div style={{ width: isHybridBottom ? 960 : overlayLayout.subtitles.width, marginBottom: isHybridBottom ? 160 : 0 }}>
@@ -168,7 +169,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
             padding: isHybridBottom ? '18px 36px 28px' : '26px 30px 28px',
             background: isHybridBottom ? 'rgba(10,10,18,0.88)' : CREAM,
             borderRadius: isHybridBottom ? 24 : 26,
-            boxShadow: isHybridBottom ? '0 24px 60px rgba(0,0,0,0.55)' : '0 24px 50px rgba(21,26,25,0.08)',
+            boxShadow: isHybridBottom ? `0 24px 60px ${inkAlpha(0.55)}` : '0 24px 50px rgba(21,26,25,0.08)',
             border: isHybridBottom ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(21,26,25,0.08)',
             backdropFilter: 'blur(16px)',
             textAlign: isHybridBottom ? 'center' : 'left',
@@ -196,7 +197,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
               letterSpacing: 0.5,
               color: isHybridBottom ? '#ffffff' : INK,
               textAlign: isHybridBottom ? 'center' : 'left',
-              textShadow: isHybridBottom ? '0 2px 24px rgba(0,0,0,0.75)' : 'none',
+              textShadow: isHybridBottom ? `0 2px 24px ${inkAlpha(0.75)}` : 'none',
               display: 'flex',
               flexDirection: 'column',
               gap: 10,

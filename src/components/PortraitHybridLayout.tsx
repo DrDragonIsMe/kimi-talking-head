@@ -250,7 +250,7 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
           opacity: hostOpacity,
           background: '#15151c',
           border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 28px 60px rgba(0,0,0,0.45)',
+          boxShadow: '0 28px 60px rgba(10,10,18,0.45)',
         }}
       >
         <OffthreadVideo

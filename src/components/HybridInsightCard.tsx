@@ -2,6 +2,7 @@ import React from 'react';
 import { useCurrentFrame, useVideoConfig, interpolate, Easing } from 'remotion';
 import { SubtitleCue } from '../hooks/useSubtitles';
 import { matchSceneStyle, extractInsightStatements } from '../utils/keywordMatcher';
+import { inkAlpha } from '../themes/tokens';
 
 interface HybridInsightCardProps {
   subtitles: SubtitleCue[];
@@ -84,7 +85,7 @@ export const HybridInsightCard: React.FC<HybridInsightCardProps> = ({
           border: `1.5px solid ${style.accentColor}35`,
           backdropFilter: 'blur(18px) saturate(140%)',
           WebkitBackdropFilter: 'blur(18px) saturate(140%)',
-          boxShadow: `0 18px 44px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.08)`,
+          boxShadow: `0 18px 44px ${inkAlpha(0.28)}, inset 0 1px 0 rgba(255,255,255,0.08)`,
         }}
       >
         <div
@@ -130,7 +131,7 @@ export const HybridInsightCard: React.FC<HybridInsightCardProps> = ({
             lineHeight: 1.32,
             letterSpacing: 0.3,
             textAlign,
-            textShadow: '0 2px 14px rgba(0,0,0,0.35)',
+            textShadow: `0 2px 14px ${inkAlpha(0.35)}`,
           }}
         >
           {points[0]}

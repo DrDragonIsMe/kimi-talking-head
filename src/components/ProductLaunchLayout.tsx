@@ -147,7 +147,7 @@ export const ProductLaunchLayout: React.FC<ProductLaunchLayoutProps> = ({
           borderRadius: 40,
           overflow: 'hidden',
           background: '#15151c',
-          boxShadow: '0 32px 64px rgba(0,0,0,0.2)',
+          boxShadow: '0 32px 64px rgba(10,10,18,0.2)',
         }}
       >
         <OffthreadVideo
