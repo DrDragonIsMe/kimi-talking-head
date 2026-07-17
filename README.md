@@ -15,6 +15,8 @@
 - **唇形同步**：基于 [InfiniteTalk](https://github.com/MeiGen-AI/InfiniteTalk) 将主播照片与音频合成口型匹配视频。
 - **工程级字幕**：Whisper 词级时间戳 + 口播稿字符级对齐，字幕内容严格等于原文，且自动校验稿音一致性。
 - **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote` 三套字幕 DNA 可选。
+- **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移，场景间 0.45s 交叉淡化，全部确定性驱动。
+- **BGM 与音效**：BGM 循环垫底、首尾淡入淡出；hero 时刻自动配入场音效（`assets/sfx/hero.*` 优先，缺失时 ffmpeg 合成兜底）。
 - **竖屏分镜布局**：`portrait-hybrid` 模式支持 `default / host-focus / visual-focus / minimal / balanced` 五种预设。
 - **动态视觉**：根据内容自动切换场景背景、关键词高亮、章节面包屑、观点 bullets、品牌结尾卡。
 - **标题卡 + 封面图**：首帧 2 秒标题卡，同时输出 1080×1920 封面 PNG。
@@ -182,6 +184,9 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 - `video_layout.hybrid.preset`：`default | host-focus | visual-focus | minimal | balanced`
 - `title_card.title` / `title_card.duration_seconds`
 - `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）
+- `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
+- `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
+- `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）
 - `product.*`：品牌文案、 pills、颜色
 
 ### `config/servers.json`
@@ -249,6 +254,15 @@ bash /root/aigc_apps/start.sh
 npm run dev        # Remotion 预览
 npm run build      # TypeScript 检查
 ```
+
+测试：
+
+| 目的 | 命令 |
+|------|------|
+| 全部离线套件 + 类型检查 | `npm test` |
+| 视觉回归（SSIM 像素对比） | `npm run test:visual` |
+| 有意变更模板后重落基线 | `UPDATE_BASELINE=1 npm run test:visual` |
+| 单独跑某个套件 | `node scripts/test_karaoke_words.js` 等 |
 
 渲染指定视频（高级）：
 

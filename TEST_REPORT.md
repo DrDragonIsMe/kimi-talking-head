@@ -22,7 +22,14 @@
 | `scripts/test_subtitle_parsing.js` | 字幕文本归一化、视觉宽度、分段、SRT 解析与校验、边界情况 | 133/133 通过 |
 | `scripts/test_sync_timing.js` | SRT 时间解析、时间偏移、分段后时长连续性、音频-视频时长匹配、帧时间换算、active cue 查找、OffthreadVideo 同步 | 86/86 通过 |
 | `scripts/test_keyword_matcher.js` | 关键词匹配、场景风格、引用触发、数据条触发 | 78/78 通过 |
-| **合计** | | **344/344 通过** |
+| `scripts/test_karaoke_words.js` | 词级分词与时间戳、words 挂载与降级、hero 定位与密度控制、hero_phrase 校验（require 真实模块） | 11/11 通过 |
+| `scripts/test_audio_pipeline.js` | hero 音效 ffmpeg 合成产物、BGM/SFX/进度条配置字段、BGM 素材可解码 | 4/4 通过 |
+| **合计** | | **359/359 通过** |
+
+### 1.3 统一入口与视觉回归
+- `npm test`：以上全部套件 + `tsc --noEmit` 类型检查，CI（`.github/workflows/test.yml`）同口径执行。
+- `npm run test:visual`：视觉回归——对 `scripts/fixtures/visual/` 固定 fixture 渲染 karaoke / hero / 交叉淡化三个代表帧，与 `baseline/` 做 SSIM 像素对比（阈值 0.98）。模板有意变更后人工确认渲染正确，再 `UPDATE_BASELINE=1 npm run test:visual` 重落基线。因系统字体差异，视觉回归只在本地运行，不上 CI。
+- `scripts/validate_props.js`：渲染前 props 预检，已接入 `pipeline.sh`，非法 props 在渲染前终止。
 
 ---
 

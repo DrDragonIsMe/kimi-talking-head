@@ -1,0 +1,129 @@
+{
+  "audioPath": "fixture_visual/audio.wav",
+  "srtPath": "fixture_visual/subtitles.srt",
+  "subtitles": [
+    {
+      "start": 0.5,
+      "end": 2.5,
+      "text": "今天我们验证卡拉OK字幕",
+      "words": [
+        { "text": "今天", "start": 0.5, "end": 1.0 },
+        { "text": "我们", "start": 1.0, "end": 1.4 },
+        { "text": "验证", "start": 1.4, "end": 1.8 },
+        { "text": "卡拉", "start": 1.8, "end": 2.1 },
+        { "text": "OK", "start": 2.1, "end": 2.3 },
+        { "text": "字幕", "start": 2.3, "end": 2.5 }
+      ]
+    },
+    {
+      "start": 2.6,
+      "end": 4.5,
+      "text": "高点时刻即将到来",
+      "words": [
+        { "text": "高点", "start": 2.6, "end": 3.0 },
+        { "text": "时刻", "start": 3.0, "end": 3.4 },
+        { "text": "即将", "start": 3.4, "end": 3.9 },
+        { "text": "到来", "start": 3.9, "end": 4.5 }
+      ]
+    },
+    {
+      "start": 4.6,
+      "end": 7.5,
+      "text": "交叉淡化正在发生",
+      "words": [
+        { "text": "交叉", "start": 4.6, "end": 5.0 },
+        { "text": "淡化", "start": 5.0, "end": 5.4 },
+        { "text": "正在", "start": 5.4, "end": 5.9 },
+        { "text": "发生", "start": 5.9, "end": 7.5 }
+      ]
+    }
+  ],
+  "hostVideoPath": "fixture_visual/host.mp4",
+  "title": "视觉回归基线",
+  "subtitle": "模板变更检测夹具",
+  "brand": "测试品牌",
+  "tagline": "回归测试",
+  "slogan": "",
+  "cta": "",
+  "pills": ["卡拉OK", "交叉淡化"],
+  "features": [],
+  "coverMeta": { "summary": "", "insight": "", "stats": [] },
+  "sceneVisuals": [
+    {
+      "start": 0,
+      "end": 4,
+      "path": "fixture_visual/scene_a.png",
+      "provider": "pexels"
+    },
+    {
+      "start": 4,
+      "end": 8,
+      "path": "fixture_visual/scene_b.png",
+      "provider": "pexels"
+    }
+  ],
+  "chapters": [
+    { "start": 0, "end": 4, "title": "第一章" },
+    { "start": 4, "end": 8, "title": "第二章" }
+  ],
+  "dataBars": [],
+  "quoteHighlight": null,
+  "heroMoments": [{ "start": 3.0, "end": 3.8, "text": "时刻" }],
+  "bgmPath": null,
+  "bgmVolume": 0,
+  "sfxHeroPath": null,
+  "sfxVolume": 0.5,
+  "contentOverlay": {
+    "subtitles": {
+      "maxLines": 2,
+      "maxCharsPerLine": 22,
+      "fontSizeLarge": 58,
+      "fontSizeMedium": 50,
+      "fontSizeSmall": 44,
+      "headlineLabel": "回归测试",
+      "dna": "loud",
+      "segmentation": {
+        "maxSegmentSeconds": 3.2,
+        "minSegmentSeconds": 0.9,
+        "maxVisualLength": 26
+      }
+    },
+    "talkingPoints": {
+      "enabled": false,
+      "maxItems": 2,
+      "mainLabel": "观点拆解",
+      "secondaryLabel": "SUPPORTING POINT"
+    },
+    "dataBars": { "enabled": false, "maxItems": 5, "label": "数据条", "fallbackItems": [] },
+    "quoteHighlight": { "enabled": false, "label": "引用高亮", "fallbackQuote": "", "fallbackAuthor": "" },
+    "layout": {
+      "sequence": ["editorial-left", "editorial-right", "editorial-balanced"],
+      "holdCues": 3
+    }
+  },
+  "videoLayout": {
+    "mode": "portrait-hybrid",
+    "template": "editorial",
+    "hybrid": {
+      "mainVisualRatio": 0.58,
+      "hostWindowWidth": 560,
+      "hostWindowHeight": 640,
+      "showSubtitles": true,
+      "showTalkingPoints": false,
+      "showProgressBreadcrumb": false,
+      "showProgressBar": true,
+      "showChapterCards": false,
+      "showDataBars": false,
+      "showQuoteHighlight": false,
+      "topicTag": { "enabled": false },
+      "brandBadge": { "enabled": false }
+    }
+  },
+  "template": "editorial",
+  "titleCardDurationFrames": 30,
+  "talkingDurationFrames": 240,
+  "endcardDurationFrames": 30,
+  "totalDurationFrames": 300,
+  "primaryColor": "#00b498",
+  "secondaryColor": "#00d4c8"
+}
