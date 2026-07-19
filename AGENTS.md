@@ -15,6 +15,7 @@
 - `src/utils/sceneMotion.ts` — deterministic Ken Burns + crossfade math for scene visuals.
 - `config/host_profile.json` — host photo, voice reference, template, layout preset, brand copy.
 - `config/servers.json` — SSH + GPU server paths, updated by `scripts/detect_paths.sh`.
+- `api/server.js` + `api/public/` — web admin (Express + no-build static SPA): job CRUD, run/rebuild/stop/clone, preview, grouped config form. Job state in `api/jobs/<uuid>/state.json`; child processes tracked in a Map, stop kills the process group. `PIPELINE_SCRIPT`/`REBUILD_SCRIPT` env hooks override script paths (used by tests).
 - `server/` — GPU server deployment scripts and model checklist.
 
 ## Conventions

@@ -19,7 +19,7 @@ function getStatePath(jobId) {
   return path.join(getJobDir(jobId), 'state.json');
 }
 
-function createJob({ outputName, originalName = 'article.md', configOverrides = null }) {
+function createJob({ outputName, originalName = 'article.md', configOverrides = null, kind = 'full' }) {
   ensureJobsDir();
   const jobId = randomUUID();
   const jobDir = getJobDir(jobId);
@@ -30,7 +30,9 @@ function createJob({ outputName, originalName = 'article.md', configOverrides = 
 
   const state = {
     jobId,
-    status: 'pending',
+    // 状态机：draft → queued → running → completed / failed / cancelled
+    status: 'draft',
+    kind, // full=全量 pipeline，rebuild=复用媒体重渲
     outputName: safeOutputName,
     originalName,
     configOverrides,
@@ -46,6 +48,9 @@ function createJob({ outputName, originalName = 'article.md', configOverrides = 
     },
     error: null,
     exitCode: null,
+    queuedAt: null,
+    startedAt: null,
+    finishedAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -95,6 +100,19 @@ function sanitizeOutputName(name) {
     .slice(0, 80);
 }
 
+// 删除整个 job 目录（api/jobs/<id>/）；jobId 只允许 UUID 形态，防路径穿越
+function deleteJob(jobId) {
+  const jobDir = getJobDir(jobId);
+  const resolved = path.resolve(jobDir);
+  if (!resolved.startsWith(path.resolve(JOBS_DIR) + path.sep)) {
+    throw new Error(`Invalid job id: ${jobId}`);
+  }
+  if (fs.existsSync(resolved)) {
+    fs.rmSync(resolved, { recursive: true, force: true });
+  }
+  return true;
+}
+
 module.exports = {
   PROJECT_ROOT,
   JOBS_DIR,
@@ -103,4 +121,6 @@ module.exports = {
   updateJob,
   listJobs,
   getJobDir,
+  deleteJob,
+  sanitizeOutputName,
 };

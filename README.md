@@ -154,6 +154,43 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 | 强制重跑字幕阶段 | `FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video` |
 | 预览 Remotion 组件 | `npm run dev` |
 | TypeScript 检查 | `npm run build` |
+| 启动 Web 管理后台 | `npm run web`（http://localhost:3456） |
+
+---
+
+## Web 管理后台
+
+`npm run web`（等价 `npm run api`）启动管理后台，浏览器打开 http://localhost:3456：
+
+- **任务列表**：状态徽章（draft/queued/running/completed/failed/cancelled）、9 阶段进度条、行内停止/删除，运行中自动轮询。
+- **新建任务**：粘贴文章或上传 `.md/.txt`，可直接运行或存为草稿后再调参。
+- **任务详情**：
+  - **Run** 全量重跑 / **Rebuild** 复用已有音频与唇形视频快速重渲（样式迭代不走 GPU）/ **Stop** / **Clone** 克隆变体 / **Delete**（可选同时清理产物）。
+  - 在线 Preview（支持拖动进度）+ 封面 + 下载；阶段步进器 + 实时日志。
+  - 分组参数表单（字幕 DNA/字号、布局预设/卡片缩放、BGM/音效、标题覆盖），写入任务级 `configOverrides`，与 `config/host_profile.json` 深合并；支持裸 JSON 高级模式。
+  - 文章在线编辑。
+
+> ⚠️ 后台无鉴权，仅面向本机使用，不要暴露到公网。
+
+### HTTP API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/jobs` | 创建任务：multipart（`article` 文件）或 JSON `{outputName, articleText, config, run}`；`run:false` 存草稿 |
+| `GET` | `/api/v1/jobs` | 任务列表（含阶段进度、hasMedia、队列位置） |
+| `GET` | `/api/v1/jobs/:id` | 任务详情（含完整阶段状态、configOverrides、文章） |
+| `PATCH` | `/api/v1/jobs/:id` | 调整 outputName / configOverrides / 文章（运行中 409） |
+| `DELETE` | `/api/v1/jobs/:id` | 删除任务；`?purge=1` 同时清理 `temp/` 与 `output/` 产物 |
+| `POST` | `/api/v1/jobs/:id/run` | 全量重跑（pipeline.sh） |
+| `POST` | `/api/v1/jobs/:id/rebuild` | 复用媒体快速重渲（render_with_reused_media.sh） |
+| `POST` | `/api/v1/jobs/:id/stop` | 停止（排队中取消 / 运行中杀进程组） |
+| `POST` | `/api/v1/jobs/:id/clone` | 克隆任务（可带新 outputName/config/run） |
+| `GET` | `/api/v1/jobs/:id/preview/:file` | 在线预览 video/cover（支持 Range 拖动） |
+| `GET` | `/api/v1/jobs/:id/download/:file` | 下载 video/cover |
+| `GET` | `/api/v1/jobs/:id/logs/:type` | stdout/stderr 日志流 |
+| `GET` | `/api/v1/config` | 基础配置（脱敏）+ 表单枚举（字幕 DNA/布局预设/素材类型） |
+
+并发由 `MAX_CONCURRENT`（默认 1）控制，多余任务进入队列。
 
 ---
 

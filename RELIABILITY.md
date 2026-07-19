@@ -47,6 +47,7 @@ bash scripts/render_with_reused_media.sh \
 ```
 
 This reuses the original `script.txt` and `subtitles_raw.json` so audio and subtitles stay consistent.
+The web admin (`npm run web`) exposes the same fast path as the **Rebuild** button; it shares the pipeline state machine and the `MAX_CONCURRENT` semaphore with the CLI, so jobs started from the browser and from the shell do not run concurrently.
 
 ## 6. Monitoring
 
