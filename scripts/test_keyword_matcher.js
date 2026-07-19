@@ -345,6 +345,7 @@ function clampLineByWidth(text, maxWidth) {
 function findSplitIndex(text, maxWidth) {
   let width = 0;
   let lastPreferredBreak = -1;
+  let lastPreferredBreakWidth = 0;
 
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
@@ -352,13 +353,23 @@ function findSplitIndex(text, maxWidth) {
 
     if (/[，、：,:；;。！？!? ]/.test(char)) {
       lastPreferredBreak = i + 1;
+      lastPreferredBreakWidth = width;
     }
 
     if (width > maxWidth) {
-      if (lastPreferredBreak > 0) {
+      // 只有不超预算的断点才可取：预算之外的标点（如行尾逗号）不能作为断点，
+      // 否则整行会超过 maxWidth
+      if (lastPreferredBreak > 0 && lastPreferredBreakWidth <= maxWidth) {
         return lastPreferredBreak;
       }
-      return Math.max(1, i);
+      // 硬切：把紧跟的句读标点并入本行（悬挂标点），避免下一行以标点开头
+      let cut = Math.max(1, i);
+      let merged = 0;
+      while (cut < text.length && merged < 2 && /[，、：,:；;。！？!?）)》」』]/.test(text[cut])) {
+        cut++;
+        merged++;
+      }
+      return cut;
     }
   }
 
@@ -766,6 +777,30 @@ for (const line of narrowLines) {
   const visualLen = getVisualLength(line);
   assert(visualLen <= 10, `line "${line}" visual length ${visualLen} <= maxCharsPerLine 10`);
 }
+
+// 行尾标点超出预算时不能作为断点（否则整行超宽、nowrap 时向右溢出）
+const punctTailText = '有创业公司刚成立就拿到了六千六百万美元融资，后续还有新产品。';
+const punctTailLines = formatSubtitleLines(punctTailText, 2, 19);
+assert(punctTailLines.length >= 2, 'punct-tail text wraps into multiple lines');
+for (const line of punctTailLines) {
+  const visualLen = getVisualLength(line);
+  assert(visualLen <= 20, `line "${line}" visual length ${visualLen} <= 19 + 1 hanging punct`);
+  assert(!/^[，、：,:；;。！？!?）)》」』]/.test(line), `line "${line}" must not start with punctuation`);
+}
+
+// 整句只有一个行尾标点时的悬挂标点容差：允许标点悬挂出行（最多超 1 个视觉宽度）
+const singleClauseText = '有创业公司刚成立就拿到了六千六百万美元融资，';
+const singleClauseLines = formatSubtitleLines(singleClauseText, 2, 21);
+assertEqual(singleClauseLines.length, 1, 'single clause with trailing comma stays one line');
+assert(
+  getVisualLength(singleClauseLines[0]) <= 22,
+  `hanging punct line visual length ${getVisualLength(singleClauseLines[0])} <= 21 + 1`
+);
+
+// 预算内的标点断点仍然优先
+const breakableText = '超过一半的企业高管说，他们公司已经把AI智能体跑在了真实业务里';
+const breakableLines = formatSubtitleLines(breakableText, 2, 19);
+assertEqual(breakableLines[0], '超过一半的企业高管说，', 'splits at in-budget punctuation first');
 
 // ---------------------------------------------------------------------------
 // 8. extractInsightStatements

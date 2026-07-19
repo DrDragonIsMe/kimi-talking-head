@@ -43,8 +43,10 @@ source "$PROJECT_DIR/scripts/lib/state.sh"
 # macOS bash 3.2 不支持 test -ef，用 stat 比较设备号+inode（BSD/GNU 两态）。
 copy_if_different() {
   local a b
-  a=$(stat -f '%d:%i' "$1" 2>/dev/null || stat -c '%d:%i' "$1" 2>/dev/null)
-  b=$(stat -f '%d:%i' "$2" 2>/dev/null || stat -c '%d:%i' "$2" 2>/dev/null)
+  # 目标文件不存在时两条 stat 都会失败，命令替换的非零退出码会在 set -e 下中断脚本，
+  # 用 || true 兜底（源文件存在性已由上方的 -s 检查保证）。
+  a=$(stat -f '%d:%i' "$1" 2>/dev/null || stat -c '%d:%i' "$1" 2>/dev/null || true)
+  b=$(stat -f '%d:%i' "$2" 2>/dev/null || stat -c '%d:%i' "$2" 2>/dev/null || true)
   if [ -n "$a" ] && [ "$a" = "$b" ]; then
     return 0
   fi

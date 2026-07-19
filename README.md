@@ -14,7 +14,7 @@
 - **声音克隆**：基于 [IndexTTS2](https://github.com/index-tts/index-tts)，使用参考音频克隆主播声音。
 - **唇形同步**：基于 [InfiniteTalk](https://github.com/MeiGen-AI/InfiniteTalk) 将主播照片与音频合成口型匹配视频。
 - **工程级字幕**：Whisper 词级时间戳 + 口播稿字符级对齐，字幕内容严格等于原文，且自动校验稿音一致性。
-- **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote` 三套字幕 DNA 可选。
+- **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote / cream / editorial / documentary` 六套字幕 DNA 可选，hero 全屏时刻由 `HeroOverlay` 统一渲染、任意 DNA 下均与入场音效同步可见。
 - **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移，场景间 fade/wipe/zoom 三种转场确定性轮换。
 - **视频 B-roll**：`scene_visuals.media_type` 支持 `video / mixed`，Pexels 视频素材自动检索下载、按片段时长循环铺满场景，图片 provider 自动兜底。
 - **音频可视化**：底部实时波形条（`visualizeAudio` 驱动，可关闭）。
@@ -185,12 +185,13 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 - `video_layout.mode`：`portrait-hybrid`
 - `video_layout.hybrid.preset`：`default | host-focus | visual-focus | minimal | balanced`
 - `title_card.title` / `title_card.duration_seconds`
-- `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）
+- `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）。hero 关键词全屏时刻由 `HeroOverlay` 统一渲染，任意 DNA 下都会与入场音效同步出现
 - `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
 - `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
 - `scene_visuals.media_type`：场景素材类型，`image`（默认）/ `video`（全视频 B-roll）/ `mixed`（奇偶交替）
 - `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）
 - `video_layout.hybrid.showWaveform`：底部音频波形条（默认开）
+- `video_layout.hybrid.chapterCardScale`：章节观点卡片整体缩放系数（卡宽、内边距、字号同比，默认 1.3）；卡片堆叠起点为画布高度 1/6 处
 - `product.*`：品牌文案、 pills、颜色
 
 ### `config/servers.json`

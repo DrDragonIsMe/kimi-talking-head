@@ -76,14 +76,38 @@ if (!title) {
   title = fallbackTitle;
 }
 
-// Truncate overly long titles and move the remainder to subtitle.
+// Split overly long titles at a clause boundary so the title stays a complete
+// clause/sentence; the remainder becomes the subtitle. A hard mid-word cut is
+// only the last resort (no punctuation within SOFT_MAX_TITLE_LEN).
+const CLAUSE_BREAKS = '，、；：,;:！？!?。.';
+const SOFT_MAX_TITLE_LEN = 36;
+
 if (title.length > MAX_TITLE_LEN) {
-  subtitle = title.slice(MAX_TITLE_LEN).trim();
-  title = title.slice(0, MAX_TITLE_LEN).trim();
-  const lastSpace = title.lastIndexOf(' ');
-  if (lastSpace > MAX_TITLE_LEN / 2) {
-    subtitle = title.slice(lastSpace + 1) + subtitle;
-    title = title.slice(0, lastSpace);
+  let splitAt = -1;
+  for (let i = 0; i < title.length && i + 1 <= SOFT_MAX_TITLE_LEN; i++) {
+    if (!CLAUSE_BREAKS.includes(title[i])) continue;
+    if (i + 1 <= MAX_TITLE_LEN && i + 1 >= 4) {
+      splitAt = i + 1; // last clause boundary within MAX_TITLE_LEN
+    } else if (splitAt < 0 && i + 1 > MAX_TITLE_LEN) {
+      splitAt = i + 1; // none within MAX: first boundary within SOFT_MAX
+    }
+  }
+
+  if (splitAt > 0) {
+    subtitle = title.slice(splitAt).trim();
+    title = title
+      .slice(0, splitAt)
+      .replace(/[，、；：,;:。]+$/, '')
+      .trim();
+  } else {
+    subtitle = title.slice(MAX_TITLE_LEN).trim();
+    title = title.slice(0, MAX_TITLE_LEN).trim();
+    const lastSpace = title.lastIndexOf(' ');
+    if (lastSpace > MAX_TITLE_LEN / 2) {
+      const moved = title.slice(lastSpace + 1);
+      subtitle = subtitle ? `${moved} ${subtitle}` : moved;
+      title = title.slice(0, lastSpace);
+    }
   }
 }
 

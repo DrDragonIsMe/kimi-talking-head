@@ -11,7 +11,7 @@
 - `scripts/lib/remote_job.sh` — shared SSH/SCP options, conda env activation resolution, nohup remote job submit, and status polling (timeout + ssh-failure circuit breaker) used by `tts_index.sh` / `infinitetalk.sh` / `musetalk.sh`.
 - `scripts/align_subtitles.py` — word-level Whisper JSON + script character-level alignment; also emits `subtitles_words.json` (karaoke word timings).
 - `scripts/locate_hero_moments.js` — locates LLM-picked `hero_phrase` (storyboard) in word timings → `hero_moments.json`.
-- `src/themes/captions/` — caption DNA registry (`classic` / `loud` / `keynote`); selected via `content_overlay.subtitles.dna`.
+- `src/themes/captions/` — caption DNA registry (`classic` / `loud` / `keynote` / `cream` / `editorial` / `documentary`); selected via `content_overlay.subtitles.dna`. Hero keyword pops are rendered by `src/components/HeroOverlay.tsx` under every DNA.
 - `src/utils/sceneMotion.ts` — deterministic Ken Burns + crossfade math for scene visuals.
 - `config/host_profile.json` — host photo, voice reference, template, layout preset, brand copy.
 - `config/servers.json` — SSH + GPU server paths, updated by `scripts/detect_paths.sh`.

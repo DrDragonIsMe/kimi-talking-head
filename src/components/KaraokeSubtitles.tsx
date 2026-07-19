@@ -3,6 +3,7 @@ import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, Easing } fr
 import type { SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
 import type { CaptionDna } from '../themes/captions';
 import { inkAlpha, Z } from '../themes/tokens';
+import { HeroOverlay, computeHeroState } from './HeroOverlay';
 
 interface KaraokeSubtitlesProps {
   cue: SubtitleCue | null;
@@ -11,12 +12,10 @@ interface KaraokeSubtitlesProps {
   fontSize: number;
 }
 
-/** hero 提前压暗的秒数，让入场有铺垫 */
-const HERO_PRE_ROLL_SECONDS = 0.12;
-
 /**
  * 词级卡拉 OK 字幕渲染器。
  * 全部动效由 frame + interpolate 驱动：确定性、可 seek、无 CSS transition。
+ * hero 关键词层由 HeroOverlay 统一渲染（与 classic 字幕路径共享）。
  */
 export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, hero, fontSize }) => {
   const frame = useCurrentFrame();
@@ -25,29 +24,8 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
 
   const { colors, motion, hero: heroDna } = dna;
 
-  // ---- hero 时刻 ----
-  let heroProgress = 0; // 0 = 无 hero，1 = hero 完整呈现
-  let heroExit = 0; // 0 = 未退出，1 = 完全退出
-  let heroVisible = false;
-  if (hero) {
-    const entranceStart = hero.start - HERO_PRE_ROLL_SECONDS;
-    const entranceEnd = hero.start + heroDna.entranceSeconds;
-    const exitStart = hero.end + heroDna.holdSeconds;
-    const exitEnd = exitStart + heroDna.exitSeconds;
-    heroVisible = currentTime >= entranceStart && currentTime <= exitEnd;
-    if (heroVisible) {
-      heroProgress = interpolate(currentTime, [entranceStart, entranceEnd], [0, 1], {
-        extrapolateLeft: 'clamp',
-        extrapolateRight: 'clamp',
-        easing: Easing.out(Easing.cubic),
-      });
-      heroExit = interpolate(currentTime, [exitStart, exitEnd], [0, 1], {
-        extrapolateLeft: 'clamp',
-        extrapolateRight: 'clamp',
-        easing: Easing.in(Easing.cubic),
-      });
-    }
-  }
+  // hero 时间轴与 HeroOverlay 共享，用于压暗字幕卡片
+  const { progress: heroProgress, exit: heroExit } = computeHeroState(hero, currentTime, heroDna);
 
   // ---- 词序列 ----
   const words = cue?.words ?? [];
@@ -152,83 +130,7 @@ export const KaraokeSubtitles: React.FC<KaraokeSubtitlesProps> = ({ cue, dna, he
         ) : null}
       </AbsoluteFill>
 
-      {heroVisible && hero ? (
-        <AbsoluteFill
-          style={{
-            justifyContent: 'center',
-            alignItems: 'center',
-            pointerEvents: 'none',
-            zIndex: Z.hero,
-          }}
-        >
-          <AbsoluteFill
-            style={{
-              background: inkAlpha(
-                Number((heroDna.scrimOpacity * heroProgress * (1 - heroExit)).toFixed(3))
-              ),
-            }}
-          />
-          <HeroText dna={dna} hero={hero} progress={heroProgress} exit={heroExit} currentTime={currentTime} />
-        </AbsoluteFill>
-      ) : null}
+      <HeroOverlay hero={hero} dna={dna} />
     </>
-  );
-};
-
-const HeroText: React.FC<{
-  dna: CaptionDna;
-  hero: HeroMoment;
-  progress: number;
-  exit: number;
-  currentTime: number;
-}> = ({ dna, hero, progress, exit, currentTime }) => {
-  const heroDna = dna.hero;
-  const holdTime = Math.max(0, currentTime - hero.start);
-
-  let transform = '';
-  let clipPath: string | undefined;
-
-  if (heroDna.entrance === 'pop') {
-    const scale = heroDna.fromScale + (1 - heroDna.fromScale) * progress;
-    const riseY = (1 - progress) * heroDna.fromY;
-    transform = `scale(${scale}) translateY(${riseY}px)`;
-  } else {
-    // wipe-up：clip-path 揭示 + 轻微上移，缩放通道留给呼吸
-    clipPath = `inset(${(1 - progress) * 100}% 0 0 0)`;
-    transform = `translateY(${(1 - progress) * 48}px)`;
-  }
-
-  if (heroDna.breathe > 0 && progress >= 1 && exit <= 0) {
-    const breatheScale = 1 + heroDna.breathe * Math.sin(holdTime * Math.PI * 2 * 1.1);
-    transform += ` scale(${breatheScale})`;
-  }
-  if (exit > 0) {
-    transform += ` scale(${1 - 0.12 * exit}) translateY(${-24 * exit}px)`;
-  }
-
-  return (
-    <div
-      style={{
-        fontFamily: dna.fontFamily,
-        fontWeight: dna.heroFontWeight,
-        fontStyle: dna.heroFontStyle ?? 'normal',
-        fontSize: heroDna.fontSize,
-        lineHeight: 1.2,
-        letterSpacing: 2,
-        color: dna.colors.heroText,
-        textAlign: 'center',
-        maxWidth: 940,
-        padding: '0 40px',
-        opacity: progress * (1 - exit),
-        transform,
-        clipPath,
-        textShadow:
-          heroDna.glow > 0
-            ? `0 0 ${Math.round(60 * heroDna.glow)}px ${dna.colors.accent}, 0 4px 30px ${inkAlpha(0.8)}`
-            : `0 4px 30px ${inkAlpha(0.8)}`,
-      }}
-    >
-      {hero.text}
-    </div>
   );
 };

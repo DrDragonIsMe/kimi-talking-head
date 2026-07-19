@@ -41,6 +41,8 @@ interface PortraitHybridLayoutProps {
     showProgressBar?: boolean;
     showWaveform?: boolean;
     showChapterCards?: boolean;
+    /** 章节观点卡片整体缩放系数（宽度、内边距、字号同比），默认 1.3 */
+    chapterCardScale?: number;
     showDataBars?: boolean;
     showQuoteHighlight?: boolean;
     topicTag?: {
@@ -210,6 +212,7 @@ export const PortraitHybridLayout: React.FC<PortraitHybridLayoutProps> = ({
             position="top-right"
             maxVisible={5}
             cardWidth={530}
+            scale={hybridConfig.chapterCardScale ?? 1.3}
           />
         ) : null}
 

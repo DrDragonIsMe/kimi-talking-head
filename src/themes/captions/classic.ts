@@ -16,7 +16,8 @@ export const CLASSIC_DNA: CaptionDna = {
   colors: {
     text: '#151A19',
     accent: '#00b498',
-    heroText: '#151A19',
+    // hero 大字叠在全屏压暗 scrim 上，必须用亮色保证对比度
+    heroText: '#FAFAF7',
     cardBackground: '#FAFAF7',
     cardBorder: 'rgba(21,26,25,0.08)',
   },
