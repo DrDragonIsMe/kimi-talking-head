@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCurrentFrame, interpolate } from 'remotion';
+import { useCurrentFrame } from 'remotion';
 
 export const WarmGlow: React.FC = () => {
   const frame = useCurrentFrame();

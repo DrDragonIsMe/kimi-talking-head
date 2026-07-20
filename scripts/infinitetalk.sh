@@ -43,7 +43,7 @@ FRAME_NUM=$(awk -v dur="$AUDIO_DURATION" -v fps=25 'BEGIN {
 }')
 
 if [ -n "$MAX_FRAME_NUM" ] && [ "$MAX_FRAME_NUM" != "null" ] && [ "$FRAME_NUM" -gt "$MAX_FRAME_NUM" ]; then
-    echo "⚠️  计算帧数 $FRAME_NUM 超过最大限制 $MAX_FRAME_NUM，已截断" >&2
+    echo "⚠️  计算帧数 $FRAME_NUM 超过最大限制 ${MAX_FRAME_NUM}，已截断" >&2
     FRAME_NUM=$MAX_FRAME_NUM
 fi
 

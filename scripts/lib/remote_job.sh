@@ -11,6 +11,64 @@
 # 让网络故障快速失败，ServerAlive* 保留各脚本原有的长任务连接保活。
 REMOTE_JOB_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=60 -o ServerAliveCountMax=7"
 
+# worker 池（P2-12）：config/servers.json 可选 workers 数组，round-robin + 可达性预检选机。
+# round-robin 游标跨进程持久化在这个状态文件里（可用 REMOTE_JOB_RR_STATE 覆盖，测试用）。
+REMOTE_JOB_RR_STATE="${REMOTE_JOB_RR_STATE:-${TMPDIR:-/tmp}/kimi_talking_head_workers.rr}"
+
+# 从 workers 池选择一个可用 worker。
+# 用法: remote_job_select_worker <config_json_file>
+# 输出（stdout）: "<selector> <host> <port> <user>"
+#   selector 为 workers 数组下标（0/1/2…），回退 primary 时为 "primary"。
+# 选择语义：
+#   - 无 workers 配置（数组缺失/为空）→ 直接输出 primary 单服务器字段（旧行为，不打日志）；
+#   - 有 workers → 从上次游标起 round-robin，逐个做 `ssh -o ConnectTimeout=5 <worker> true`
+#     可达性预检，跳过不可达者，选中第一个可达的并把游标推进到下一个；
+#   - workers 全部不可达 → 打警告日志并回退 primary（与无 workers 时相同）。
+# config 无 primary.host 时返回非零。日志一律走 stderr，stdout 只输出结果。
+remote_job_select_worker() {
+    local config="$1"
+    local count
+    count=$(jq -r '(.workers // []) | length' "$config" 2>/dev/null || echo 0)
+    case "$count" in ''|*[!0-9]*) count=0 ;; esac
+
+    if [ "$count" -gt 0 ]; then
+        local start=0
+        if [ -f "$REMOTE_JOB_RR_STATE" ]; then
+            start=$(cat "$REMOTE_JOB_RR_STATE" 2>/dev/null || echo 0)
+        fi
+        case "$start" in ''|*[!0-9]*) start=0 ;; esac
+
+        local i idx name host port user
+        for ((i = 0; i < count; i++)); do
+            idx=$(( (start + i) % count ))
+            name=$(jq -r ".workers[$idx].name // \"worker$idx\"" "$config")
+            host=$(jq -r ".workers[$idx].host // empty" "$config")
+            port=$(jq -r ".workers[$idx].port // 22" "$config")
+            user=$(jq -r ".workers[$idx].user // \"root\"" "$config")
+            if [ -z "$host" ]; then
+                echo "⚠️ worker[$idx] $name 未配置 host，跳过" >&2
+                continue
+            fi
+            if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "$user@$host" true 2>/dev/null; then
+                echo $(( (idx + 1) % count )) > "$REMOTE_JOB_RR_STATE"
+                echo "✅ 选择 worker[$idx] ${name}（${user}@${host}:${port}）" >&2
+                printf '%s %s %s %s' "$idx" "$host" "$port" "$user"
+                return 0
+            fi
+            echo "⚠️ worker[$idx] ${name}（${user}@${host}:${port}）不可达，跳过" >&2
+        done
+        echo "⚠️ workers 全部不可达，回退 primary 单服务器配置" >&2
+    fi
+
+    # 回退：primary 单服务器字段（向后兼容旧行为）
+    local host port user
+    host=$(jq -r '.primary.host // empty' "$config")
+    port=$(jq -r '.primary.port // 22' "$config")
+    user=$(jq -r '.primary.user // "root"' "$config")
+    [ -z "$host" ] && return 1
+    printf '%s %s %s %s' "primary" "$host" "$port" "$user"
+}
+
 # 状态轮询中连续 ssh 失败多少次后熔断退出（调用方可在 source 前覆盖）。
 REMOTE_JOB_MAX_SSH_FAILURES="${REMOTE_JOB_MAX_SSH_FAILURES:-5}"
 
@@ -103,7 +161,10 @@ EOF
         return "$submit_rc"
     fi
 
-    ssh -p "$REMOTE_JOB_PORT" $REMOTE_JOB_SSH_OPTS "$REMOTE_JOB_USER@$REMOTE_JOB_HOST" "cat '$pid_file' 2>/dev/null || echo ''"
+    # 远端 shell 启动横幅（.zshenv/.bashrc/motd 等）会混进 stdout，
+    # 取最后一个纯数字行作为 PID，避免把横幅当成 PID 传给 poll
+    ssh -p "$REMOTE_JOB_PORT" $REMOTE_JOB_SSH_OPTS "$REMOTE_JOB_USER@$REMOTE_JOB_HOST" "cat '$pid_file' 2>/dev/null || echo ''" \
+        | grep -oE '^[0-9]+$' | tail -n 1
 }
 
 # 轮询远端任务状态直到完成。
@@ -144,11 +205,18 @@ remote_job_poll() {
                     printf 'running size=0\n'
                 fi
             else
-                printf 'missing_status\n'
+                # status 文件在任务结束时才写入；进程刚死/未起时也可能处于
+                # 初始化窗口。附带日志大小，让调用方能区分'正在干活'和'真死了'
+                LSIZE=\$(wc -c < '$log_file' 2>/dev/null || echo 0)
+                printf 'missing_status size=%s\n' \"\$LSIZE\"
             fi
         " 2>/dev/null || echo "ssh_failed")
 
-        echo "⏳ $label 状态: $status_output"
+        # missing_status 由下方分支打印更明确的进度信息，这里不重复输出
+        case "$status_output" in
+            missing_status*) ;;
+            *) echo "⏳ $label 状态: $status_output" ;;
+        esac
 
         case "$status_output" in
             status=0*)
@@ -187,10 +255,15 @@ remote_job_poll() {
                 echo "⚠️ 无法获取远端 $label 状态，稍后重试..." >&2
                 sleep "$poll_interval"
                 ;;
-            missing_status)
-                # ssh 本身成功（进程已死但还没写 status），不计入 ssh 熔断
+            missing_status*)
+                # ssh 本身成功（进程已死但还没写 status，或 runner 尚在初始化），
+                # 不计入 ssh 熔断；展示远端日志大小，避免"卡住"错觉
                 ssh_failures=0
-                echo "⚠️ 无法获取远端 $label 状态，稍后重试..." >&2
+                local msize=0
+                case "$status_output" in
+                    *size=*) msize=$(echo "$status_output" | sed -n 's/.*size=\([0-9]*\).*/\1/p') ;;
+                esac
+                echo "⏳ 远端 $label 初始化/运行中（status 未生成，日志已 ${msize} 字节），继续等待..."
                 sleep "$poll_interval"
                 ;;
             *)

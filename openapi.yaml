@@ -1,0 +1,297 @@
+openapi: 3.0.3
+info:
+  title: 薪灵视频后台 API（kimi-talking-head web admin）
+  version: 2.3.0
+  description: |
+    文章转口播视频的任务管理后台。版本化运行：每次 run/rebuild 生成新版本（v1=outputName，vN=<outputName>_vN），
+    旧版本产物保留。默认本机无鉴权；设置 WEB_TOKENS="alice:tokenA,bob:tokenB" 后，
+    所有 /api/* 与 /assets/* 路由要求 `Authorization: Bearer <token>`（或 `?access_token=`，供媒体/EventSource 使用），
+    任务按用户隔离（他人任务 404），模板分用户存储（api/templates.<user>.json）。
+    任务可携带 hostProfile（config/hosts/ 下的主播配置）、schedule（cron 定时）、triggerToken（外部触发）；
+    创建时做口播稿质量预检（ARTICLE_VALIDATE_MODE=warn 降级为警告）；webhook 投递状态持久化于版本记录
+    webhookDelivery（重启恢复）；详情返回 costEstimate 成本预估。
+  contact: {}
+servers:
+  - url: http://localhost:3456
+tags:
+  - name: jobs
+  - name: templates
+  - name: assets
+  - name: meta
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: 健康检查（公开，无需鉴权）
+      responses:
+        '200': { description: ok: true, maxConcurrent, running }
+  /api/v1/jobs:
+    post:
+      tags: [jobs]
+      summary: 创建任务（multipart 上传 article 文件，或 JSON {outputName?, articleText, config?, run?, webhookUrl?, hostProfile?, schedule?}）
+      description: |
+        run:false 存草稿（201）；默认创建后立即排队（202）。webhookUrl 需为 http(s) URL（≤2048 字符）。
+        hostProfile 为 config/hosts/ 下的 .json 文件名（默认 host_profile.json，经 HOST_PROFILE 环境变量传给 pipeline，绝对路径）。
+        schedule 为 cron 表达式（5 或 6 段），创建即注册定时器。
+        创建前执行口播稿质量预检（node scripts/validate_article.js）：不通过返回 400 + checks；
+        ARTICLE_VALIDATE_MODE=warn 时降级为警告（响应带 articleWarnings）；脚本缺失时放行。
+      responses:
+        '201': { description: 草稿已创建 }
+        '202': { description: 已创建并排队 }
+        '400': { description: 参数/文件类型/预检校验失败 }
+    get:
+      tags: [jobs]
+      summary: 任务列表（含 9 阶段摘要、hasMedia、hasOutput、queuePosition、latestVersion）
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200': { description: '{total, limit, offset, jobs[]}' }
+  /api/v1/jobs/batch:
+    post:
+      tags: [jobs]
+      summary: 批量创建 {items: [{outputName?, articleText, config?, webhookUrl?}], run}
+      description: 逐条校验，单条失败不中断整批；items ≤100；run:true 经信号量串行执行
+      responses:
+        '200': { description: '{jobs: [{ok, job|error}]}' }
+        '400': { description: items 为空或超限 }
+  /api/v1/jobs/{id}:
+    get:
+      tags: [jobs]
+      summary: 任务详情（阶段状态、configOverrides、文章、versions、configDirty、media、hostProfile、schedule、triggerToken、costEstimate）
+      description: |
+        costEstimate 由 api/versioning.js 的 estimateCost 计算（{tokens, seconds}；未实现时为 null）。
+        版本记录含 webhookDelivery 字段（{status: pending|delivered|failed, attempts, lastAttemptAt, lastError}），
+        webhook 投递状态持久化，进程重启后自动恢复 pending 投递。
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: 任务详情 }
+        '404': { description: 不存在（或他人任务） }
+    patch:
+      tags: [jobs]
+      summary: 修改 outputName / configOverrides / articleText / webhookUrl（运行中 409）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: 已更新 }
+        '409': { description: 任务进行中 }
+    delete:
+      tags: [jobs]
+      summary: 删除任务；?purge=1 同时清理所有版本的 temp/ 与 output/ 产物
+      parameters:
+        - { $ref: '#/components/parameters/jobId' }
+        - { name: purge, in: query, schema: { type: string, enum: ['1'] } }
+      responses:
+        '200': { description: '{deleted, jobId, purged[]}' }
+  /api/v1/jobs/{id}/run:
+    post:
+      tags: [jobs]
+      summary: 新建版本全量重跑（body 可选 {fromPhase} 手动指定失效起点）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '202': { description: 已排队 }
+        '400': { description: fromPhase 非法或文章缺失 }
+        '409': { description: 任务进行中 }
+  /api/v1/jobs/{id}/rebuild:
+    post:
+      tags: [jobs]
+      summary: 新建版本（kind=rebuild）仅重渲 render 阶段，零 GPU 零 LLM（需已有媒体）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '202': { description: 已排队 }
+        '400': { description: 缺少 audio.wav / lip_synced_raw.mp4 }
+  /api/v1/jobs/{id}/retry:
+    post:
+      tags: [jobs]
+      summary: 失败重试：同一版本续跑（不产生新版本）；body 可选 {phase} 注入 FORCE_<PHASE>=1
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '202': { description: 已排队 }
+        '400': { description: 从未运行或 phase 非法 }
+        '409': { description: 任务进行中 }
+  /api/v1/jobs/{id}/stop:
+    post:
+      tags: [jobs]
+      summary: 停止（排队中取消 / 运行中 SIGTERM 进程组）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: 已停止 }
+        '409': { description: 非活跃状态 }
+  /api/v1/jobs/{id}/clone:
+    post:
+      tags: [jobs]
+      summary: 克隆任务（文章 + configOverrides；body 可覆盖 outputName/config/run）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '201': { description: 已克隆（draft） }
+        '202': { description: 已克隆并排队 }
+  /api/v1/jobs/{id}/script:
+    get:
+      tags: [jobs]
+      summary: 读取最新版本的口播稿 script.txt（未生成 404）；?version=N 读取历史备份 script.v{N}.txt
+      parameters:
+        - { $ref: '#/components/parameters/jobId' }
+        - { name: version, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: '{script, version?}' }
+        '404': { description: 未生成或指定版本不存在 }
+    put:
+      tags: [jobs]
+      summary: 写回口播稿（运行中 409；不存在则创建；旧 script.txt 自动备份为 script.v{N}.txt）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: '{ok, bytes, backedUpVersion}' }
+        '409': { description: 任务进行中 }
+  /api/v1/jobs/{id}/script/versions:
+    get:
+      tags: [jobs]
+      summary: 口播稿历史版本列表 [{version, bytes, modifiedAt}]（升序）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: '{versions: [...]}' }
+  /api/v1/jobs/{id}/schedule:
+    post:
+      tags: [jobs]
+      summary: 设置/更新定时任务 {cron}（5 或 6 段 cron 表达式，立即生效；到点触发一次全量 run，活跃中跳过本轮）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: 任务详情（schedule 已更新） }
+        '400': { description: cron 表达式非法 }
+    delete:
+      tags: [jobs]
+      summary: 取消定时任务
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: 任务详情（schedule=null） }
+  /api/v1/trigger/{token}:
+    post:
+      tags: [jobs]
+      summary: 外部触发端点（无需 Bearer 鉴权，triggerToken 即凭证）；命中任务的 triggerToken 则发起一次全量 run
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '202': { description: 已排队 }
+        '400': { description: 文章缺失 }
+        '404': { description: 未知 token }
+        '409': { description: 任务进行中 }
+  /api/v1/jobs/{id}/preview:
+    get:
+      tags: [jobs]
+      summary: 渐进式低清预览流（video_layout.preview.enabled 时 pipeline 在 render 早期产出 temp/<run>/preview.mp4；出现后经 SSE 推 preview_ready）
+      parameters: [{ $ref: '#/components/parameters/jobId' }]
+      responses:
+        '200': { description: video/mp4 预览流（支持 Range） }
+        '404': { description: 预览未产出 }
+  /api/v1/jobs/{id}/preview/{file}:
+    get:
+      tags: [jobs]
+      summary: 在线预览 video/cover（Range 拖动；?version=N 指定版本，默认最新 completed）
+      parameters:
+        - { $ref: '#/components/parameters/jobId' }
+        - { name: file, in: path, required: true, schema: { type: string, enum: [video, cover] } }
+        - { name: version, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: 媒体流（支持 Range） }
+        '404': { description: 产物未生成 }
+  /api/v1/jobs/{id}/download/{file}:
+    get:
+      tags: [jobs]
+      summary: 下载 video/cover（attachment；?version=N 同上）
+      parameters:
+        - { $ref: '#/components/parameters/jobId' }
+        - { name: file, in: path, required: true, schema: { type: string, enum: [video, cover] } }
+        - { name: version, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: 附件下载 }
+  /api/v1/jobs/{id}/logs/{type}:
+    get:
+      tags: [jobs]
+      summary: stdout/stderr 日志流
+      parameters:
+        - { $ref: '#/components/parameters/jobId' }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [stdout, stderr] } }
+      responses:
+        '200': { description: text/plain 日志流 }
+  /api/v1/templates:
+    get:
+      tags: [templates]
+      summary: 模板列表（首次读取写入内置模板「知识科普」「发布会风」；鉴权开启时按用户分文件）
+      responses:
+        '200': { description: '{templates: [{name, overrides}]}' }
+    post:
+      tags: [templates]
+      summary: 新建/覆盖模板 {name, overrides}（name ≤40 字，按名 upsert）
+      responses:
+        '200': { description: '{ok, name, overrides}' }
+        '400': { description: 校验失败 }
+  /api/v1/templates/{name}:
+    delete:
+      tags: [templates]
+      summary: 删除模板
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ok, deleted}' }
+        '404': { description: 模板不存在 }
+  /api/v1/estimates:
+    get:
+      tags: [meta]
+      summary: 执行预估：最近 20 个已完成版本按 kind 分组的 {avgSeconds, samples}
+      responses:
+        '200': { description: '{full, rebuild}' }
+  /api/v1/stats:
+    get:
+      tags: [meta]
+      summary: 数据看板：totals / perDay(14d) / avgDurationByKind / failureByPhase
+      responses:
+        '200': { description: 聚合统计 }
+  /api/v1/assets:
+    get:
+      tags: [assets]
+      summary: 素材库清单：场景画面（按 run 分组）+ BGM + 主播 profile
+      responses:
+        '200': { description: '{sceneVisuals, bgm, hosts}' }
+  /api/v1/events:
+    get:
+      tags: [meta]
+      summary: SSE 事件流：job 状态变更推送 {type:'job', ...}；低清预览产出推送 {type:'preview_ready', jobId, runName, preview}；25s 注释帧保活（SSE_KEEPALIVE_MS 可调）
+      responses:
+        '200': { description: text/event-stream }
+  /api/v1/config:
+    get:
+      tags: [meta]
+      summary: 基础配置（脱敏）+ 表单枚举 + lastJobOverrides
+      responses:
+        '200': { description: '{profile, lastJobOverrides, enums}' }
+  /assets/scene/{path}:
+    get:
+      tags: [assets]
+      summary: 场景画面静态挂载（containment + 图片/视频扩展名白名单）
+      parameters:
+        - { name: path, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 媒体文件 }
+        '400': { description: 路径越界 }
+        '404': { description: 不存在或扩展名不允许 }
+  /assets/bgm/{file}:
+    get:
+      tags: [assets]
+      summary: BGM 静态挂载（containment + 音频扩展名白名单）
+      parameters:
+        - { name: file, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 音频文件 }
+        '400': { description: 路径越界 }
+        '404': { description: 不存在或扩展名不允许 }
+components:
+  parameters:
+    jobId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: WEB_TOKENS 启用时必传；也可用 ?access_token= 查询参数（媒体/EventSource）
+security: []

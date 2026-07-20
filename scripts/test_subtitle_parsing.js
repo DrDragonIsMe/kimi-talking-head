@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // =============================================================================
-// Re-implemented functions from scripts/parse_srt.js
+// Segmentation functions come from the single source of truth:
+// scripts/lib/subtitle_segmentation.js (shared by parse_srt.js / useSubtitles.ts / keywordMatcher.ts)
 // =============================================================================
 
 const DEFAULT_SEGMENTATION = {
@@ -24,166 +25,19 @@ const readSegmentationConfig = () => {
 
 const config = readSegmentationConfig();
 
-const normalizeSubtitleText = (text) =>
-  text
-    .replace(/\s+/g, ' ')
-    .trim();
-
-const isMeaningfulUnit = (text) => /[\u4e00-\u9fa5A-Za-z0-9]/.test(text);
-
-const getCharVisualWidth = (char) => {
-  if (char === ' ') return 0.35;
-  if (/[A-Za-z0-9]/.test(char)) return 0.62;
-  if (/[.,:;!?'"`-]/.test(char)) return 0.38;
-  return 1;
-};
-
-const getVisualLength = (text) =>
-  Array.from(text).reduce((sum, char) => sum + getCharVisualWidth(char), 0);
-
-const splitByDelimiters = (text, delimiters) => {
-  const result = [];
-  let current = '';
-  for (const char of text) {
-    current += char;
-    if (delimiters.test(char)) {
-      const trimmed = current.trim();
-      if (trimmed) result.push(trimmed);
-      current = '';
-    }
-  }
-  const tail = current.trim();
-  if (tail) result.push(tail);
-  return result;
-};
-
-const findSplitIndex = (text, maxWidth) => {
-  let width = 0;
-  let lastPreferredBreak = -1;
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    width += getCharVisualWidth(char);
-    if (/[，、：,:；;。！？!? ]/.test(char)) {
-      lastPreferredBreak = i + 1;
-    }
-    if (width > maxWidth) {
-      return lastPreferredBreak > 0 ? lastPreferredBreak : Math.max(1, i);
-    }
-  }
-  return text.length;
-};
-
-const splitLongUnit = (text, maxWidth) => {
-  const result = [];
-  let remaining = normalizeSubtitleText(text);
-  while (remaining && getVisualLength(remaining) > maxWidth) {
-    const splitIndex = findSplitIndex(remaining, maxWidth);
-    const head = normalizeSubtitleText(remaining.slice(0, splitIndex));
-    const tail = normalizeSubtitleText(remaining.slice(splitIndex));
-    if (!head || head === remaining) {
-      result.push(normalizeSubtitleText(remaining.slice(0, Math.max(1, splitIndex))));
-      remaining = normalizeSubtitleText(remaining.slice(Math.max(1, splitIndex)));
-      continue;
-    }
-    result.push(head);
-    remaining = tail;
-  }
-  if (remaining) result.push(remaining);
-  return result.filter(Boolean);
-};
-
-const tokenizeCueText = (text) => {
-  const normalized = normalizeSubtitleText(text);
-  if (!normalized) return [];
-  const sentenceUnits = splitByDelimiters(normalized, /[。！？!?；;—]/);
-  const clauseUnits = sentenceUnits.flatMap((unit) => splitByDelimiters(unit, /[，、：,:]/));
-  const baseUnits = clauseUnits.length > 0 ? clauseUnits : sentenceUnits;
-  return (baseUnits.length > 0 ? baseUnits : [normalized])
-    .map((unit) => normalizeSubtitleText(unit))
-    .filter((unit) => unit && isMeaningfulUnit(unit))
-    .flatMap((unit) => (getVisualLength(unit) > config.maxVisualLength ? splitLongUnit(unit, config.maxVisualLength) : [unit]))
-    .filter(Boolean);
-};
-
-const groupUnits = (units, desiredCount) => {
-  if (units.length <= desiredCount) {
-    return units.map((unit) => [unit]);
-  }
-  const groups = [];
-  const totalVisualLength = units.reduce((sum, unit) => sum + getVisualLength(unit), 0);
-  const targetVisualLength = totalVisualLength / desiredCount;
-  let currentGroup = [];
-  let currentVisualLength = 0;
-
-  for (let index = 0; index < units.length; index++) {
-    const unit = units[index];
-    const unitVisualLength = getVisualLength(unit);
-    const remainingUnits = units.length - index;
-    const remainingSlots = desiredCount - groups.length;
-
-    if (
-      currentGroup.length > 0 &&
-      remainingSlots > 1 &&
-      (currentVisualLength + unitVisualLength > targetVisualLength * 1.18 || remainingUnits === remainingSlots)
-    ) {
-      groups.push(currentGroup);
-      currentGroup = [unit];
-      currentVisualLength = unitVisualLength;
-    } else {
-      currentGroup.push(unit);
-      currentVisualLength += unitVisualLength;
-    }
-  }
-  if (currentGroup.length > 0) groups.push(currentGroup);
-
-  while (groups.length > desiredCount) {
-    const tail = groups.pop();
-    if (!tail) break;
-    groups[groups.length - 1] = groups[groups.length - 1].concat(tail);
-  }
-  return groups;
-};
-
-const segmentCue = (cue) => {
-  const duration = cue.end - cue.start;
-  const normalizedText = normalizeSubtitleText(cue.text);
-  const visualLength = getVisualLength(normalizedText);
-  if (!normalizedText) return [];
-
-  if (duration <= 2.4 && visualLength <= config.maxVisualLength * 1.2) {
-    return [{ ...cue, text: normalizedText }];
-  }
-
-  const units = tokenizeCueText(normalizedText);
-  if (units.length <= 1) {
-    return [{ ...cue, text: normalizedText }];
-  }
-
-  const desiredByDuration = Math.ceil(duration / config.maxSegmentSeconds);
-  const desiredByLength = Math.ceil(visualLength / (config.maxVisualLength * 1.2));
-  const maxSegmentsByDuration = Math.max(1, Math.floor(duration / config.minSegmentSeconds));
-  const desiredCount = Math.max(1, Math.min(Math.max(desiredByDuration, desiredByLength), maxSegmentsByDuration, units.length));
-
-  const groupedUnits = groupUnits(units, desiredCount);
-  if (groupedUnits.length <= 1) {
-    return [{ ...cue, text: normalizedText }];
-  }
-
-  const weights = groupedUnits.map((group) => Math.max(1, group.reduce((sum, unit) => sum + getVisualLength(unit), 0)));
-  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-
-  let cursor = cue.start;
-  let consumedWeight = 0;
-
-  return groupedUnits.map((group, index) => {
-    const text = normalizeSubtitleText(group.join(''));
-    consumedWeight += weights[index];
-    const end = index === groupedUnits.length - 1 ? cue.end : cue.start + (duration * consumedWeight) / totalWeight;
-    const segmentedCue = { start: cursor, end, text };
-    cursor = end;
-    return segmentedCue;
-  });
-};
+// 单一数据源：scripts/lib/subtitle_segmentation.js（禁止内联副本）
+const {
+  normalizeSubtitleText,
+  isMeaningfulUnit,
+  getCharVisualWidth,
+  getVisualLength,
+  splitByDelimiters,
+  findSplitIndex,
+  splitLongUnit,
+  tokenizeCueText,
+  groupUnits,
+  segmentCue,
+} = require('./lib/subtitle_segmentation');
 
 const parseSRT = (content) => {
   const cues = [];
@@ -205,7 +59,7 @@ const parseSRT = (content) => {
       start: parseTime(timeMatch[1]),
       end: parseTime(timeMatch[2]),
       text: text.trim(),
-    }));
+    }, config));
   }
   return cues;
 };
@@ -236,6 +90,31 @@ const validateSubtitles = (cues) => {
     }
     if (typeof cue.text !== 'string' || cue.text.trim().length === 0) {
       errors.push(`字幕 cue ${i} 的 text 不能为空`);
+    }
+
+    // 词级时间戳是可选增强：存在时必须结构正确、时间单调且在 cue 范围内
+    if (cue.words !== undefined) {
+      if (!Array.isArray(cue.words) || cue.words.length === 0) {
+        errors.push(`字幕 cue ${i} 的 words 必须是非空数组`);
+        continue;
+      }
+      let prevStart = -Infinity;
+      for (let j = 0; j < cue.words.length; j++) {
+        const word = cue.words[j];
+        if (typeof word.text !== 'string' || word.text.length === 0) {
+          errors.push(`字幕 cue ${i} 的第 ${j} 个词 text 不能为空`);
+        }
+        if (typeof word.start !== 'number' || typeof word.end !== 'number' || word.end < word.start) {
+          errors.push(`字幕 cue ${i} 的第 ${j} 个词 start/end 非法`);
+        }
+        if (word.start < prevStart) {
+          errors.push(`字幕 cue ${i} 的词级时间戳必须单调递增（第 ${j} 个词回退）`);
+        }
+        if (word.start < cue.start - 0.5 || word.end > cue.end + 0.5) {
+          errors.push(`字幕 cue ${i} 的第 ${j} 个词超出 cue 时间范围`);
+        }
+        prevStart = word.start;
+      }
     }
   }
 
@@ -387,6 +266,15 @@ testGroup('findSplitIndex', () => {
   assertEqual(findSplitIndex('hello', 100), 5, 'text shorter than maxWidth returns full length');
   assertEqual(findSplitIndex('a', 0.1), 1, 'minimum split is at least 1');
   assertEqual(findSplitIndex('abcdefghij', 0.1), 1, 'no preferred break, very small width, returns 1');
+
+  // 增强版：预算之外的标点不能作为断点（否则整行超宽），但硬切时会作为悬挂标点并入本行
+  // 10 个 CJK 字（宽度 10）+ 逗号（i=10，宽度 11 > 10 不可取为断点）→ 硬切在 i=10 并把逗号并入，返回 11
+  assertEqual(findSplitIndex('一二三四五六七八九十，三四五六七八九十', 10), 11, 'punct break beyond budget rejected; hanging punct merged instead');
+  // 预算内的标点断点仍优先：逗号在 i=5，宽度 6 <= 10，返回 i+1=6
+  assertEqual(findSplitIndex('一二三四五，六七八九十一二三四五六七八九十', 10), 6, 'in-budget punct break is preferred');
+  // 增强版：硬切时把紧跟的悬挂标点并入本行（最多 2 个），避免下一行以标点开头
+  // 10 个 CJK 字 + 「，。」→ 硬切在 i=10，并入 2 个标点，返回 12
+  assertEqual(findSplitIndex('一二三四五六七八九十，。三四五六七', 10), 12, 'hanging punctuation merged into current line (up to 2)');
 });
 
 // =============================================================================
@@ -419,24 +307,24 @@ testGroup('splitLongUnit', () => {
 
 testGroup('tokenizeCueText', () => {
   // Simple text
-  const tokens1 = tokenizeCueText('Hello world');
+  const tokens1 = tokenizeCueText('Hello world', config);
   assert(tokens1.length >= 1, 'simple text produces tokens');
 
   // CJK text
-  const tokens2 = tokenizeCueText('你好世界，这是一个测试。结果如何？');
+  const tokens2 = tokenizeCueText('你好世界，这是一个测试。结果如何？', config);
   assert(tokens2.length >= 1, 'CJK text produces tokens');
 
   // Empty text
-  assertDeepEqual(tokenizeCueText(''), [], 'empty text returns empty array');
-  assertDeepEqual(tokenizeCueText('   '), [], 'whitespace-only returns empty');
+  assertDeepEqual(tokenizeCueText('', config), [], 'empty text returns empty array');
+  assertDeepEqual(tokenizeCueText('   ', config), [], 'whitespace-only returns empty');
 
   // Mixed CJK and English
-  const tokens3 = tokenizeCueText('Hello你好World世界');
+  const tokens3 = tokenizeCueText('Hello你好World世界', config);
   assert(tokens3.length >= 1, 'mixed CJK/English produces tokens');
 
   // Very long sentence without delimiters
   const longText = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const tokens4 = tokenizeCueText(longText);
+  const tokens4 = tokenizeCueText(longText, config);
   assert(tokens4.length > 1, `very long sentence without delimiters splits into multiple tokens (got ${tokens4.length})`);
 });
 
@@ -472,7 +360,7 @@ testGroup('groupUnits', () => {
 testGroup('segmentCue — basic', () => {
   // Short cue, short text — should not segment
   const shortCue = { start: 0, end: 1.5, text: 'Hello' };
-  const shortResult = segmentCue(shortCue);
+  const shortResult = segmentCue(shortCue, config);
   assertEqual(shortResult.length, 1, 'short cue with short text returns single sub-cue');
   assertEqual(shortResult[0].text, 'Hello', 'text preserved');
   assertEqual(shortResult[0].start, 0, 'start preserved');
@@ -480,11 +368,11 @@ testGroup('segmentCue — basic', () => {
 
   // Empty text cue
   const emptyCue = { start: 0, end: 1, text: '' };
-  assertDeepEqual(segmentCue(emptyCue), [], 'empty text cue returns empty array');
+  assertDeepEqual(segmentCue(emptyCue, config), [], 'empty text cue returns empty array');
 
   // Whitespace only
   const wsCue = { start: 0, end: 1, text: '   ' };
-  assertDeepEqual(segmentCue(wsCue), [], 'whitespace-only cue returns empty array');
+  assertDeepEqual(segmentCue(wsCue, config), [], 'whitespace-only cue returns empty array');
 });
 
 testGroup('segmentCue — sub-cue timestamp properties', () => {
@@ -494,7 +382,7 @@ testGroup('segmentCue — sub-cue timestamp properties', () => {
     end: 10,
     text: 'This is a long text that should be segmented into multiple sub-cues because it has a long duration and long content that needs to be split, and we need to verify that the timestamps are correct.',
   };
-  const result = segmentCue(longCue);
+  const result = segmentCue(longCue, config);
   if (result.length > 1) {
     // Strictly increasing timestamps
     for (let i = 1; i < result.length; i++) {
@@ -539,7 +427,7 @@ testGroup('segmentCue — very short duration, long text', () => {
     end: 0.5,
     text: '这是一个非常长的文本内容我们需要在很短的时间内显示很多文字来测试分段逻辑是否正常工作。',
   };
-  const result = segmentCue(cue);
+  const result = segmentCue(cue, config);
   // The duration is short (<= 2.4) and visual length might be high, so it segments anyway
   assert(result.length >= 1, 'very short duration with long text still produces segments');
   if (result.length > 1) {
@@ -557,7 +445,7 @@ testGroup('segmentCue — duration below minSegmentSeconds', () => {
     end: 0.5,
     text: 'short text',
   };
-  const result = segmentCue(cue);
+  const result = segmentCue(cue, config);
   assertEqual(result.length, 1, 'duration below minSegmentSeconds produces single segment');
 });
 
@@ -844,13 +732,97 @@ Third subtitle for testing.`;
 
 testGroup('Integration: segmentCue sub-cue total duration equals original', () => {
   const originalCue = { start: 5, end: 15, text: 'This is a long sentence that needs to be split into multiple sub-cues for better readability and timing.' };
-  const segments = segmentCue(originalCue);
+  const segments = segmentCue(originalCue, config);
   if (segments.length > 1) {
     const totalDuration = segments[segments.length - 1].end - segments[0].start;
     assertEqual(totalDuration, 10, 'total sub-cue duration equals original');
     assertEqual(segments[0].start, 5, 'first segment starts at original start');
     assertEqual(segments[segments.length - 1].end, 15, 'last segment ends at original end');
   }
+});
+
+// =============================================================================
+// Tests: validateSubtitles — word-level validation
+// =============================================================================
+
+testGroup('validateSubtitles — cues with valid words', () => {
+  const r = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [{ text: 'hello', start: 0, end: 1 }] },
+    { start: 1, end: 2, text: 'world', words: [{ text: 'world', start: 1, end: 2 }] },
+    { start: 2, end: 3, text: 'test', words: [{ text: 'test', start: 2, end: 3 }] },
+  ]);
+  assert(r.valid, 'cues with valid word-level timestamps pass validation');
+});
+
+testGroup('validateSubtitles — words must be non-empty array', () => {
+  const r1 = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [] },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(!r1.valid, 'empty words array is invalid');
+
+  const r2 = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: 'not-an-array' },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(!r2.valid, 'non-array words is invalid');
+});
+
+testGroup('validateSubtitles — word text must be non-empty', () => {
+  const r = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [{ text: '', start: 0, end: 0.5 }] },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(!r.valid, 'empty word text is invalid');
+});
+
+testGroup('validateSubtitles — word start/end must be valid', () => {
+  const r1 = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [{ text: 'h', start: 0.5, end: 0.3 }] },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(!r1.valid, 'word end < start is invalid');
+
+  const r2 = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [{ text: 'h', start: '0', end: 1 }] },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(!r2.valid, 'non-numeric word start is invalid');
+});
+
+testGroup('validateSubtitles — word timestamps must be monotonic', () => {
+  const r = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [
+      { text: 'h', start: 0.5, end: 0.6 },
+      { text: 'e', start: 0.3, end: 0.4 }, // 回退
+    ] },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(!r.valid, 'non-monotonic word timestamps are invalid');
+});
+
+testGroup('validateSubtitles — words must be within cue time range', () => {
+  const r = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [{ text: 'hello', start: -0.6, end: 0.5 }] },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(!r.valid, 'word outside cue time range is invalid');
+});
+
+testGroup('validateSubtitles — words within ±0.5s tolerance accepted', () => {
+  const r = validateSubtitles([
+    { start: 0, end: 1, text: 'hello', words: [{ text: 'hello', start: -0.4, end: 1.4 }] },
+    { start: 1, end: 2, text: 'world' },
+    { start: 2, end: 3, text: 'test' },
+  ]);
+  assert(r.valid, 'words within ±0.5s tolerance of cue range accepted');
 });
 
 // =============================================================================

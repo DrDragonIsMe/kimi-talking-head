@@ -5,7 +5,6 @@ import { matchSceneStyle, findQuoteTriggerCue } from '../utils/keywordMatcher';
 import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
 import type { ContentOverlayConfig, QuoteHighlightData } from '../index';
 
-const CREAM = '#FAFAF7';
 const INK = '#151A19';
 
 interface QuoteHighlightProps {

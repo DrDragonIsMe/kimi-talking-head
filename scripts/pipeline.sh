@@ -7,7 +7,8 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TEMP_ROOT="$PROJECT_DIR/temp"
 WORK_DIR="$TEMP_ROOT/$OUTPUT_NAME"
 OUTPUT_DIR="$PROJECT_DIR/output"
-PROFILE="${3:-$PROJECT_DIR/config/host_profile.json}"
+# 主播配置：第 3 个位置参数 > HOST_PROFILE 环境变量（后端多主播切换传入，绝对路径）> 默认 config/host_profile.json
+PROFILE="${3:-${HOST_PROFILE:-$PROJECT_DIR/config/host_profile.json}}"
 CONFIG="$PROJECT_DIR/config/servers.json"
 
 source "$PROJECT_DIR/scripts/monitor_utils.sh"
@@ -29,6 +30,10 @@ if [ ! -f "$ARTICLE_FILE" ]; then
     echo "❌ 文章文件不存在: $ARTICLE_FILE" >&2
     exit 1
 fi
+
+# Pre-flight：host 配置校验（字幕 DNA 等），无效配置在此明确报错退出，
+# 避免渲染层静默回退 classic 后用户难以排查。
+bash "$PROJECT_DIR/scripts/lib/validate_config.sh" "$PROFILE"
 
 export PIPELINE_RUN_ID="${PIPELINE_RUN_ID:-${OUTPUT_NAME}_$(date +%Y%m%d_%H%M%S)}"
 export PROFILE
@@ -209,6 +214,19 @@ else
     ARTICLE_FILE_ABS=$(cd "$(dirname "$ARTICLE_FILE")" && pwd)/$(basename "$ARTICLE_FILE")
     if [ "$ARTICLE_FILE_ABS" != "$WORK_DIR/article_raw.md" ]; then
         cp "$ARTICLE_FILE" "$WORK_DIR/article_raw.md"
+    fi
+
+    # 文章质量预检：默认仅警告不阻断，STRICT_ARTICLE_CHECK=1 时不通过即终止。
+    ARTICLE_CHECK_EXIT=0
+    ARTICLE_CHECK=$(node "$PROJECT_DIR/scripts/validate_article.js" "$WORK_DIR/article_raw.md") || ARTICLE_CHECK_EXIT=$?
+    if [ "$ARTICLE_CHECK_EXIT" -ne 0 ]; then
+        echo "⚠️  文章质量预检未通过:"
+        echo "$ARTICLE_CHECK" | jq -r '.checks[]? | select(.ok == false) | "   - \(.name): \(.detail)"' 2>/dev/null || echo "$ARTICLE_CHECK"
+        if [ "${STRICT_ARTICLE_CHECK:-0}" = "1" ]; then
+            echo "❌ STRICT_ARTICLE_CHECK=1，文章质量预检未通过，终止流水线" >&2
+            exit 1
+        fi
+        echo "   （默认仅警告；设置 STRICT_ARTICLE_CHECK=1 可强制阻断）"
     fi
 
     TEMPLATE=$(jq -r '.template // "editorial"' "$PROFILE")
@@ -531,7 +549,7 @@ LIPSYNC_EXIT=0
 wait $SUBTITLES_VISUALS_PID || SUBTITLES_VISUALS_EXIT=$?
 wait $LIPSYNC_PID || LIPSYNC_EXIT=$?
 if [ "$SUBTITLES_VISUALS_EXIT" -ne 0 ] || [ "$LIPSYNC_EXIT" -ne 0 ]; then
-    echo "❌ 并行子任务失败（字幕/画面子任务=$SUBTITLES_VISUALS_EXIT，唇形子任务=$LIPSYNC_EXIT）" >&2
+    echo "❌ 并行子任务失败（字幕/画面子任务=${SUBTITLES_VISUALS_EXIT}，唇形子任务=${LIPSYNC_EXIT}）" >&2
     exit 1
 fi
 
@@ -704,8 +722,27 @@ SUBTITLE_SEGMENTATION_JSON="$SUBTITLE_SEGMENTATION_JSON" \
   node "$PROJECT_DIR/scripts/validate_subtitles.js" "$PROJECT_DIR/public/subtitles.json"
 SUBTITLES_JSON=$(cat "$PROJECT_DIR/public/subtitles.json")
 
-# 确保 videoLayout 包含 template
-VIDEO_LAYOUT_WITH_TEMPLATE=$(echo "$VIDEO_LAYOUT_JSON" | jq --arg tmpl "$TEMPLATE" '.template = $tmpl')
+# 多比例输出：profile 的 video_layout.aspect 决定渲染 composition（默认 9:16 竖屏）
+ASPECT=$(jq -r '.video_layout.aspect // "9:16"' "$PROFILE")
+case "$ASPECT" in
+    "16:9")
+        COMPOSITION_ID="TalkingHeadVideoLandscape"
+        RESOLUTION_LABEL="1920x1080"
+        ;;
+    "1:1")
+        COMPOSITION_ID="TalkingHeadVideoSquare"
+        RESOLUTION_LABEL="1080x1080"
+        ;;
+    *)
+        ASPECT="9:16"
+        COMPOSITION_ID="TalkingHeadVideo"
+        RESOLUTION_LABEL="1080x1920"
+        ;;
+esac
+echo "🖼️  画面比例: ${ASPECT}（composition: ${COMPOSITION_ID}）"
+
+# 确保 videoLayout 包含 template 与 aspect（props 与所选 composition 保持一致）
+VIDEO_LAYOUT_WITH_TEMPLATE=$(echo "$VIDEO_LAYOUT_JSON" | jq --arg tmpl "$TEMPLATE" --arg aspect "$ASPECT" '.template = $tmpl | .aspect = $aspect')
 
 cat > "$PROJECT_DIR/public/props.json" << EOF
 {
@@ -777,14 +814,35 @@ else
     CURRENT_PHASE="render"
     monitor_phase "render" "running" "开始 Remotion 最终渲染" "$(jq -cn --arg outputFile "$FINAL_VIDEO" --arg coverFile "$FINAL_COVER" --arg totalFrames "$TOTAL_FRAMES" '{outputFile: $outputFile, coverFile: $coverFile, totalFrames: ($totalFrames | tonumber)}')"
     mark_running "$WORK_DIR" render
-    npx remotion render src/index.tsx TalkingHeadVideo \
+
+    # 渐进式渲染：video_layout.preview.enabled=true 时先出 0.33 倍低清预览
+    # （跳过 BGM/音效，只渲染视频轨），路径硬约定为 temp/<run>/preview.mp4（后端监听）。
+    PREVIEW_ENABLED=$(jq -r '.video_layout.preview.enabled // false' "$PROFILE")
+    if [ "$PREVIEW_ENABLED" = "true" ]; then
+        PREVIEW_VIDEO="$WORK_DIR/preview.mp4"
+        PREVIEW_PROPS="$WORK_DIR/props_preview.json"
+        echo "🚀 先生成低清预览: $PREVIEW_VIDEO"
+        jq '.bgmPath = null | .sfxHeroPath = null' "$PROJECT_DIR/public/props.json" > "$PREVIEW_PROPS"
+        if npx remotion render src/index.tsx "$COMPOSITION_ID" \
+            --props "$PREVIEW_PROPS" \
+            --duration-in-frames "$TOTAL_FRAMES" \
+            --concurrency "$REMOTION_CONCURRENCY" \
+            --scale=0.33 \
+            "$PREVIEW_VIDEO"; then
+            echo "✅ 低清预览已生成: $PREVIEW_VIDEO"
+        else
+            echo "⚠️  低清预览渲染失败，继续渲染正式成品"
+        fi
+    fi
+
+    npx remotion render src/index.tsx "$COMPOSITION_ID" \
         --props public/props.json \
         --duration-in-frames "$TOTAL_FRAMES" \
         --concurrency "$REMOTION_CONCURRENCY" \
         "$FINAL_VIDEO"
 
     COVER_FRAME=$(echo "$TITLE_CARD_FRAMES / 2" | bc)
-    npx remotion still src/index.tsx TalkingHeadVideo \
+    npx remotion still src/index.tsx "$COMPOSITION_ID" \
         --props public/props.json \
         --frame "$COVER_FRAME" \
         "$FINAL_COVER"
@@ -793,7 +851,7 @@ fi
 
 if ! has_valid_video "$FINAL_VIDEO" "$MIN_VIDEO_DURATION"; then
     ACTUAL_DURATION=$(probe_duration "$FINAL_VIDEO" 2>/dev/null || echo "0")
-    echo "❌ 最终成片无效或时长异常: $FINAL_VIDEO（expected >= ${MIN_VIDEO_DURATION}s, actual=${ACTUAL_DURATION}s）" >&2
+    echo "❌ 最终成片无效或时长异常: ${FINAL_VIDEO}（expected >= ${MIN_VIDEO_DURATION}s, actual=${ACTUAL_DURATION}s）" >&2
     exit 1
 fi
 
@@ -812,7 +870,7 @@ echo "║ 输出文件: $OUTPUT_DIR/${OUTPUT_NAME}.mp4"
 echo "║ 封面图片: $OUTPUT_DIR/${OUTPUT_NAME}_cover.png"
 echo "║ 工作目录: $WORK_DIR"
 echo "║ 视频时长: $(echo "scale=1; $TOTAL_FRAMES / 30" | bc)s"
-echo "║ 分辨率: 1080x1920"
+echo "║ 分辨率: ${RESOLUTION_LABEL}（比例 ${ASPECT}）"
 echo "║ 特性: 标题卡 + 动态背景 + 关键词高亮 + 封面图"
 echo "║ 监控目录: $WORK_DIR/monitor"
 echo "╚══════════════════════════════════════════════════════════════╝"

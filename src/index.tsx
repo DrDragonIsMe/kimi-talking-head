@@ -1,7 +1,7 @@
 import React from 'react';
 import { Composition, AbsoluteFill, OffthreadVideo, Html5Audio, staticFile, useCurrentFrame, useVideoConfig, registerRoot, Sequence } from 'remotion';
+import type { CalculateMetadataFunction } from 'remotion';
 import { DynamicBackground } from './components/DynamicBackground';
-import { Subtitles } from './components/Subtitles';
 import { TalkingPoints } from './components/TalkingPoints';
 import { DataBars } from './components/DataBars';
 import { QuoteHighlight } from './components/QuoteHighlight';
@@ -50,6 +50,8 @@ export interface QuoteHighlightData {
 export interface VideoLayoutConfig {
   mode: 'talking-head' | 'portrait-hybrid';
   template?: VideoTemplate;
+  /** 画面比例：9:16 竖屏（默认，1080×1920）/ 16:9 横屏（1920×1080，TalkingHeadVideoLandscape）/ 1:1 正方形（1080×1080，TalkingHeadVideoSquare） */
+  aspect?: '9:16' | '16:9' | '1:1';
   talking_head?: {
     hostPosition?: string;
     hostWindowWidth?: number;
@@ -183,73 +185,42 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="TalkingHeadVideo"
         component={TalkingHeadVideo}
-        calculateMetadata={({props}) => {
-          const typedProps = props as {
-            totalDurationFrames?: number;
-            titleCardDurationFrames?: number;
-            talkingDurationFrames?: number;
-            endcardDurationFrames?: number;
-          };
-
-          const fallbackDuration =
-            (typedProps.titleCardDurationFrames ?? 60) +
-            (typedProps.talkingDurationFrames ?? 600) +
-            (typedProps.endcardDurationFrames ?? 180);
-
-          return {
-            durationInFrames: typedProps.totalDurationFrames ?? fallbackDuration,
-          };
-        }}
+        calculateMetadata={talkingHeadMetadata}
         fps={30}
         width={1080}
         height={1920}
+        defaultProps={TALKING_HEAD_DEFAULT_PROPS}
+      />
+      {/* 横屏 16:9：同一根组件，videoLayout.aspect 驱动 PortraitHybridLayout/TitleCard 的横屏分支 */}
+      <Composition
+        id="TalkingHeadVideoLandscape"
+        component={TalkingHeadVideo}
+        calculateMetadata={talkingHeadMetadata}
+        fps={30}
+        width={1920}
+        height={1080}
         defaultProps={{
-          audioPath: 'audio.wav',
-          srtPath: 'subtitles.srt',
-          subtitles: [],
-          hostVideoPath: 'host_video.mp4',
-          title: '视频标题',
-          subtitle: '',
-          brand: '薪灵AI',
-          tagline: '薪人薪事的AI引擎',
-          pills: ['文章转视频', '声音克隆', '唇形同步', '自动字幕'],
-          features: [],
-          slogan: '',
-          cta: '',
-          coverMeta: {
-            summary: '',
-            insight: '',
-            stats: [],
-          },
-          sceneVisuals: [],
-          dataBars: [],
-          quoteHighlight: null,
-          chapters: [],
-          heroMoments: [],
-          bgmPath: null,
-          bgmVolume: 0,
-          sfxHeroPath: null,
-          sfxVolume: 0.5,
-          contentOverlay: DEFAULT_CONTENT_OVERLAY,
+          ...TALKING_HEAD_DEFAULT_PROPS,
           videoLayout: {
-            mode: 'portrait-hybrid',
-            template: 'editorial',
-            hybrid: {
-              mainVisualRatio: 0.58,
-              hostWindowWidth: 560,
-              hostWindowHeight: 640,
-              showSubtitles: true,
-              showTalkingPoints: true,
-              topicTag: { enabled: true, label: '核心解读' },
-              brandBadge: { enabled: true },
-            },
+            ...TALKING_HEAD_DEFAULT_PROPS.videoLayout!,
+            aspect: '16:9',
           },
-          titleCardDurationFrames: 60,
-          talkingDurationFrames: 600,
-          endcardDurationFrames: 180,
-          totalDurationFrames: 840,
-          primaryColor: '#00b498',
-          secondaryColor: '#00d4c8',
+        }}
+      />
+      {/* 正方形 1:1：同一根组件，videoLayout.aspect 驱动 PortraitHybridLayout/TitleCard 的正方形分支 */}
+      <Composition
+        id="TalkingHeadVideoSquare"
+        component={TalkingHeadVideo}
+        calculateMetadata={talkingHeadMetadata}
+        fps={30}
+        width={1080}
+        height={1080}
+        defaultProps={{
+          ...TALKING_HEAD_DEFAULT_PROPS,
+          videoLayout: {
+            ...TALKING_HEAD_DEFAULT_PROPS.videoLayout!,
+            aspect: '1:1',
+          },
         }}
       />
       <Composition
@@ -344,6 +315,7 @@ const TalkingHeadVideo: React.FC<{
   const isTitleCard = frame < talkingStartFrame;
   const isEndcard = frame >= endcardStartFrame;
   const isHybrid = videoLayout.mode === 'portrait-hybrid';
+  const aspect = videoLayout.aspect ?? '9:16';
   const isProductLaunch = template === 'product-launch' || videoLayout.template === 'product-launch';
   const theme = getTheme(isProductLaunch ? 'product-launch' : 'editorial');
 
@@ -377,6 +349,7 @@ const TalkingHeadVideo: React.FC<{
           theme={theme}
           sceneVisuals={sceneVisuals}
           features={features}
+          aspect={aspect}
         />
       ) : !isEndcard ? (
         // Wrap audio and host video layouts in the same Sequence so they share
@@ -416,14 +389,12 @@ const TalkingHeadVideo: React.FC<{
               sceneVisuals={sceneVisuals}
               contentOverlay={contentOverlay}
               primaryColor={primaryColor}
-              secondaryColor={secondaryColor}
               brand={brand}
-              tagline={tagline}
-              title={title}
               chapters={chapters}
               heroMoments={heroMoments}
               talkingDurationFrames={talkingDurationFrames}
               hybridConfig={videoLayout.hybrid}
+              aspect={aspect}
             />
           ) : (
             <TalkingHeadClassicLayout
@@ -434,8 +405,6 @@ const TalkingHeadVideo: React.FC<{
               dataBars={dataBars}
               quoteHighlight={quoteHighlight}
               contentOverlay={contentOverlay}
-              primaryColor={primaryColor}
-              secondaryColor={secondaryColor}
             />
           )}
         </Sequence>
@@ -466,10 +435,7 @@ const TalkingHeadClassicLayout: React.FC<{
   sceneVisuals: SceneVisual[];
   dataBars: DataBarItem[];
   quoteHighlight: QuoteHighlightData | null;
-  chapters?: Chapter[];
   contentOverlay?: ContentOverlayConfig;
-  primaryColor: string;
-  secondaryColor: string;
 }> = ({
   srtPath,
   subtitles,
@@ -542,7 +508,7 @@ const TalkingHeadClassicLayout: React.FC<{
         </div>
       </div>
 
-      {/* 字幕与知识观点卡片内容有重叠，暂时不渲染字幕，保留 Subtitles 组件源码 */}
+      {/* 字幕与知识观点卡片内容有重叠，暂时不渲染字幕，保留 Subtitles 组件用法（重新启用时需恢复 import） */}
       {/* <Subtitles
         srtPath={srtPath}
         subtitles={subtitles}
@@ -574,6 +540,77 @@ const TalkingHeadClassicLayout: React.FC<{
       />
     </>
   );
+};
+
+type TalkingHeadProps = React.ComponentProps<typeof TalkingHeadVideo>;
+
+// 竖屏/横屏/正方形三个 composition 共用同一份默认 props 与时长推导，仅 videoLayout.aspect 不同。
+// 内容与历史上的 TalkingHeadVideo defaultProps 完全一致（视觉回归基线保持不变）。
+const TALKING_HEAD_DEFAULT_PROPS: TalkingHeadProps = {
+  audioPath: 'audio.wav',
+  srtPath: 'subtitles.srt',
+  subtitles: [],
+  hostVideoPath: 'host_video.mp4',
+  title: '视频标题',
+  subtitle: '',
+  brand: '薪灵AI',
+  tagline: '薪人薪事的AI引擎',
+  pills: ['文章转视频', '声音克隆', '唇形同步', '自动字幕'],
+  features: [],
+  slogan: '',
+  cta: '',
+  coverMeta: {
+    summary: '',
+    insight: '',
+    stats: [],
+  },
+  sceneVisuals: [],
+  dataBars: [],
+  quoteHighlight: null,
+  chapters: [],
+  heroMoments: [],
+  bgmPath: null,
+  bgmVolume: 0,
+  sfxHeroPath: null,
+  sfxVolume: 0.5,
+  contentOverlay: DEFAULT_CONTENT_OVERLAY,
+  videoLayout: {
+    mode: 'portrait-hybrid',
+    template: 'editorial',
+    hybrid: {
+      mainVisualRatio: 0.58,
+      hostWindowWidth: 560,
+      hostWindowHeight: 640,
+      showSubtitles: true,
+      showTalkingPoints: true,
+      topicTag: { enabled: true, label: '核心解读' },
+      brandBadge: { enabled: true },
+    },
+  },
+  titleCardDurationFrames: 60,
+  talkingDurationFrames: 600,
+  endcardDurationFrames: 180,
+  totalDurationFrames: 840,
+  primaryColor: '#00b498',
+  secondaryColor: '#00d4c8',
+};
+
+const talkingHeadMetadata: CalculateMetadataFunction<TalkingHeadProps> = ({ props }) => {
+  const typedProps = props as {
+    totalDurationFrames?: number;
+    titleCardDurationFrames?: number;
+    talkingDurationFrames?: number;
+    endcardDurationFrames?: number;
+  };
+
+  const fallbackDuration =
+    (typedProps.titleCardDurationFrames ?? 60) +
+    (typedProps.talkingDurationFrames ?? 600) +
+    (typedProps.endcardDurationFrames ?? 180);
+
+  return {
+    durationInFrames: typedProps.totalDurationFrames ?? fallbackDuration,
+  };
 };
 
 registerRoot(RemotionRoot);

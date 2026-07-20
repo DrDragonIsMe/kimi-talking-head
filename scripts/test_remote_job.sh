@@ -28,6 +28,8 @@ setup() {
 
   # Fake ssh: dispatch on the remote command string (last argument).
   # Behavior is driven by $SSH_STUB_DIR/mode for status queries.
+  # SSH_STUB_DOWN=<substring> 时，凡 target 含该子串的主机一律连接失败（exit 255），
+  # 供 worker 池“不可达跳过”用例使用。
   cat > "$TEST_DIR/bin/ssh" << 'STUB_EOF'
 #!/bin/bash
 log="$SSH_STUB_DIR/invocations.log"
@@ -37,6 +39,11 @@ for arg in "$@"; do
   case "$arg" in *@*) target="$arg" ;; esac
   cmd="$arg"
 done
+
+if [ -n "${SSH_STUB_DOWN:-}" ] && [[ "$target" == *"$SSH_STUB_DOWN"* ]]; then
+  echo "down:$target" >> "$log"
+  exit 255
+fi
 
 if [ "$cmd" = "$target" ]; then
   # heredoc submit form: stdin carries the script to execute remotely
@@ -68,6 +75,15 @@ case "$cmd" in
     echo "ok size=100 duration=4" ;;
   *"cat '"*)
     echo "getpid" >> "$log"
+    # 模拟远端 shell 启动横幅混入 stdout（见 SSH_STUB_DIR/banner）
+    if [ -f "$SSH_STUB_DIR/banner" ]; then
+      printf 'Starting to run /root/aigc_apps/InfiniteTalk...\n'
+    fi
+    # 模拟横幅里混入纯数字行（见 SSH_STUB_DIR/banner_numeric），
+    # 数字在真 PID 之前输出，tail -n 1 应仍取到最后一个数字行（真 PID）
+    if [ -f "$SSH_STUB_DIR/banner_numeric" ]; then
+      printf '2\n20260720\n'
+    fi
     echo "4242" ;;
   *tail*)
     echo "tail" >> "$log"
@@ -242,6 +258,28 @@ EOF
   assert_eq "4242" "$pid" "submit: outputs remote PID read from pid file"
 }
 
+test_submit_pid_ignores_remote_banner() {
+  remote_job_init "example.com" "22" "root"
+  touch "$SSH_STUB_DIR/banner"
+  local pid
+  pid=$(remote_job_submit "$R_STATUS" "$R_PID" "$R_LOG" "$R_RUNNER" << 'EOF'
+body
+EOF
+)
+  assert_eq "4242" "$pid" "submit: pid readback ignores remote shell banner noise"
+}
+
+test_pid_extraction_with_noisy_banner() {
+  remote_job_init "example.com" "22" "root"
+  touch "$SSH_STUB_DIR/banner_numeric"
+  local pid
+  pid=$(remote_job_submit "$R_STATUS" "$R_PID" "$R_LOG" "$R_RUNNER" << 'EOF'
+body
+EOF
+)
+  assert_eq "4242" "$pid" "submit: pid readback ignores numeric banner lines before real pid"
+}
+
 test_submit_script_structure() {
   remote_job_init "example.com" "22" "root"
   remote_job_submit "$R_STATUS" "$R_PID" "$R_LOG" "$R_RUNNER" "/ws/output/job_1.json" \
@@ -325,6 +363,79 @@ test_poll_missing_status_not_ssh_failure() {
   assert_eq "6" "$(wc -l < "$SSH_STUB_DIR/queries" | tr -d ' ')" "poll missing_status: kept querying past the breaker threshold"
 }
 
+# ---- 9. remote_job_select_worker（P2-12 worker 池选择） ----
+write_workers_config() {
+  cat > "$SSH_STUB_DIR/servers.json" << 'EOF'
+{
+  "primary": {"host": "primary.example", "port": 22, "user": "root"},
+  "workers": [
+    {"name": "w1", "host": "w1.example", "port": 22, "user": "gpu"},
+    {"name": "w2", "host": "w2.example", "port": 2200, "user": "ubuntu"}
+  ]
+}
+EOF
+}
+
+reset_rr() {
+  export REMOTE_JOB_RR_STATE="$SSH_STUB_DIR/rr"
+  rm -f "$REMOTE_JOB_RR_STATE"
+}
+
+test_select_first_healthy_worker() {
+  write_workers_config
+  reset_rr
+  local out
+  out=$(remote_job_select_worker "$SSH_STUB_DIR/servers.json")
+  assert_eq "0 w1.example 22 gpu" "$out" "select: picks first healthy worker"
+  assert_eq "1" "$(cat "$REMOTE_JOB_RR_STATE")" "select: round-robin cursor advanced to next"
+}
+
+test_select_round_robins() {
+  write_workers_config
+  reset_rr
+  remote_job_select_worker "$SSH_STUB_DIR/servers.json" > /dev/null
+  local out
+  out=$(remote_job_select_worker "$SSH_STUB_DIR/servers.json")
+  assert_eq "1 w2.example 2200 ubuntu" "$out" "select: round-robins to next worker on second call"
+}
+
+test_select_skips_unreachable() {
+  write_workers_config
+  reset_rr
+  local out
+  out=$(SSH_STUB_DOWN="w1.example" remote_job_select_worker "$SSH_STUB_DIR/servers.json")
+  assert_eq "1 w2.example 2200 ubuntu" "$out" "select: skips unreachable worker"
+}
+
+test_select_fallback_all_down() {
+  write_workers_config
+  reset_rr
+  local out
+  out=$(SSH_STUB_DOWN=".example" remote_job_select_worker "$SSH_STUB_DIR/servers.json" 2>"$SSH_STUB_DIR/select_err.log")
+  assert_eq "primary primary.example 22 root" "$out" "select: all workers down falls back to primary"
+  assert_file_contains "$SSH_STUB_DIR/select_err.log" "回退 primary" "select: fallback prints clear log line"
+}
+
+test_select_no_workers_array() {
+  cat > "$SSH_STUB_DIR/servers.json" << 'EOF'
+{"primary": {"host": "primary.example", "port": 22, "user": "root"}}
+EOF
+  reset_rr
+  local out
+  out=$(remote_job_select_worker "$SSH_STUB_DIR/servers.json")
+  assert_eq "primary primary.example 22 root" "$out" "select: no workers array falls back to primary"
+}
+
+test_select_empty_workers_array() {
+  cat > "$SSH_STUB_DIR/servers.json" << 'EOF'
+{"primary": {"host": "primary.example", "port": 22, "user": "root"}, "workers": []}
+EOF
+  reset_rr
+  local out
+  out=$(remote_job_select_worker "$SSH_STUB_DIR/servers.json")
+  assert_eq "primary primary.example 22 root" "$out" "select: empty workers array falls back to primary"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -355,6 +466,14 @@ main() {
   teardown
 
   setup
+  test_submit_pid_ignores_remote_banner
+  teardown
+
+  setup
+  test_pid_extraction_with_noisy_banner
+  teardown
+
+  setup
   test_submit_script_structure
   teardown
 
@@ -382,6 +501,17 @@ main() {
 
   setup
   test_poll_missing_status_not_ssh_failure
+  teardown
+
+  echo ""
+  echo "--- remote_job_select_worker ---"
+  setup
+  test_select_first_healthy_worker
+  test_select_round_robins
+  test_select_skips_unreachable
+  test_select_fallback_all_down
+  test_select_no_workers_array
+  test_select_empty_workers_array
   teardown
 
   echo ""

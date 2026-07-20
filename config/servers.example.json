@@ -29,6 +29,39 @@
     "musetalk_workspace": "",
     "musetalk_python_env": ""
   },
+  "_workers_comment": "可选（P2-12 GPU 资源池）：配置 workers 数组后，TTS 等远程任务按 round-robin + SSH 可达性预检（ConnectTimeout=5）选择 worker，跳过不可达者；未配置或全部不可达时回退 primary/backup 单服务器逻辑（向后兼容）。每个 worker 的字段与 primary 相同（host/port/user + 各服务路径），未配路径的服务对该 worker 视为不可用。",
+  "workers": [
+    {
+      "name": "gpu-1",
+      "host": "your-worker-1-ip",
+      "port": 22,
+      "user": "root",
+      "tts_path": "",
+      "tts_workspace": "",
+      "tts_python_env": "",
+      "infinitetalk_path": "",
+      "infinitetalk_workspace": "",
+      "infinitetalk_python_env": "",
+      "musetalk_path": "",
+      "musetalk_workspace": "",
+      "musetalk_python_env": ""
+    },
+    {
+      "name": "gpu-2",
+      "host": "your-worker-2-ip",
+      "port": 22,
+      "user": "root",
+      "tts_path": "",
+      "tts_workspace": "",
+      "tts_python_env": "",
+      "infinitetalk_path": "",
+      "infinitetalk_workspace": "",
+      "infinitetalk_python_env": "",
+      "musetalk_path": "",
+      "musetalk_workspace": "",
+      "musetalk_python_env": ""
+    }
+  ],
   "local": {
     "project_dir": "~/kimi-talking-head",
     "temp_dir": "~/kimi-talking-head/temp",

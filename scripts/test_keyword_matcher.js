@@ -62,10 +62,12 @@ const OPENING_GREETINGS = [
 // Inline copies of functions from keywordMatcher.ts
 // ---------------------------------------------------------------------------
 
+// 与 keywordMatcher.ts 的 normalizeTriggerText 保持一致：
+// 显式 Unicode 码点列表，覆盖直引号/弯引号/直角引号/全角引号/书名号
 function normalizeTriggerText(text) {
   return text
     .toLowerCase()
-    .replace(/[\s""''"'"'""]/g, '')
+    .replace(/[\s\u0022\u0027\u201C\u201D\u2018\u2019\u300C\u300D\uFF02\uFF07\u2039\u203A\u00AB\u00BB]/g, '')
     .replace(/[，、：:；;。！？!?]/g, '');
 }
 
@@ -550,6 +552,17 @@ assertEqual(normalizeTriggerText(''), '', 'empty string');
 assertEqual(normalizeTriggerText('   \t\n  '), '', 'whitespace only');
 assertEqual(normalizeTriggerText('Hello-World'), 'hello-world', 'hyphen preserved');
 assertEqual(normalizeTriggerText('A.I. 智能'), 'a.i.智能', 'dots preserved between letters');
+
+// Unicode 引号变体（建议2：加固后的显式码点列表）
+assertEqual(normalizeTriggerText('“增长”'), '增长', 'curly double quotes “ ” stripped');
+assertEqual(normalizeTriggerText('‘数据’'), '数据', 'curly single quotes ‘ ’ stripped');
+assertEqual(normalizeTriggerText('「指标」'), '指标', 'corner brackets 「 」 stripped');
+assertEqual(normalizeTriggerText('＂效率＂'), '效率', 'fullwidth double quotes ＂ stripped');
+assertEqual(normalizeTriggerText('＇营收＇'), '营收', 'fullwidth single quotes ＇ stripped');
+assertEqual(normalizeTriggerText('‹利润›'), '利润', 'single angle quotes ‹ › stripped');
+assertEqual(normalizeTriggerText('«成本»'), '成本', 'double angle quotes « » stripped');
+assertEqual(normalizeTriggerText('＂「AI」＂ 智能'), 'ai智能', 'mixed fullwidth + corner quotes with space stripped');
+assertEqual(normalizeTriggerText("it's"), 'its', 'straight apostrophe stripped');
 
 // ---------------------------------------------------------------------------
 // 2. matchSceneStyle — accuracy

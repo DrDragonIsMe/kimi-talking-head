@@ -18,6 +18,8 @@ Before any run, the pipeline validates:
 - Host profile, servers config, and template files exist.
 - GPU server SSH connectivity and InfiniteTalk / IndexTTS paths.
 - Local and remote dependencies (ComfyUI, Python venv, model files).
+- Caption DNA id (`scripts/lib/validate_config.sh`): `content_overlay.subtitles.dna` must be one of `classic|loud|keynote|cream|editorial|documentary`; an invalid value aborts the run with a clear error instead of silently falling back to classic.
+- Article quality (`scripts/validate_article.js`, runs before the `script` phase): effective length 100–10000 chars, code-block share < 30%, table rows < 10, Chinese share ≥ 50%. Warn-only by default; `STRICT_ARTICLE_CHECK=1` makes it fatal. The web admin runs the same check on `POST /api/v1/jobs` — 400 by default, `ARTICLE_VALIDATE_MODE=warn` downgrades to a warning, `ARTICLE_VALIDATE_SCRIPT` overrides the script path.
 
 ## 3. Subtitle Alignment
 
@@ -35,6 +37,15 @@ Before any run, the pipeline validates:
 - Model weights are documented in [`server/MODEL_CHECKLIST.md`](server/MODEL_CHECKLIST.md); they are loaded via symlinks and are never committed.
 - The local engine is selected in `config/host_profile.json` via `lipsync.engine` (`infinitetalk` or `musetalk`).
 
+### Worker pool (optional, P2-12)
+
+`config/servers.json` may add a `workers: [{name, host, port, user, ...}]` array alongside the existing `primary`/`backup` fields (see the commented example in `config/servers.example.json`). Semantics of `remote_job_select_worker` (`scripts/lib/remote_job.sh`):
+
+- **Absent or empty `workers`** → single-server behavior, byte-identical to before (returns the `primary` connection fields).
+- **Present** → round-robin starting from a cursor persisted in `REMOTE_JOB_RR_STATE` (default `${TMPDIR:-/tmp}/kimi_talking_head_workers.rr`), so consecutive pipeline runs rotate across machines. Each candidate gets a cheap precheck (`ssh -o BatchMode=yes -o ConnectTimeout=5 <worker> true`); unreachable workers are skipped with a warning. The first reachable worker wins and the cursor advances to the next index.
+- **All unreachable** → clear log line and fallback to the `primary` fields (same as the no-workers path).
+- Per-service paths (`tts_path`, `infinitetalk_path`, …) are read from the selected worker entry; a worker missing a service's path is treated as unavailable for that service (currently wired into `tts_index.sh`; other scripts keep the legacy primary/backup logic).
+
 ## 5. Reuse Without Regeneration
 
 For style or title changes only:
@@ -47,7 +58,9 @@ bash scripts/render_with_reused_media.sh \
 ```
 
 This reuses the original `script.txt` and `subtitles_raw.json` so audio and subtitles stay consistent.
-The web admin (`npm run web`) exposes the same fast path as the **Rebuild** button; it shares the pipeline state machine and the `MAX_CONCURRENT` semaphore with the CLI, so jobs started from the browser and from the shell do not run concurrently.
+The web admin (`npm run web`) goes further: its **Rebuild** button is slimmer — it creates a new version with the invalidation phase forced to `render` (see `api/versioning.js`), clones the previous version's workdir, and lets the pipeline state machine re-run only the render phase (zero GPU, zero LLM). Both paths share the pipeline state machine and the `MAX_CONCURRENT` semaphore with the CLI, so jobs started from the browser and from the shell do not run concurrently.
+
+Workdir cloning (`prepareReuseWorkdir`) uses Node's `fs.cpSync` (Node ≥ 16.7) instead of the old `cp -cR` / `cp -R` fallback chain, so reuse behaves identically on macOS and Linux.
 
 ## 6. Monitoring
 
@@ -66,7 +79,44 @@ The web admin (`npm run web`) exposes the same fast path as the **Rebuild** butt
 | Subtitle match < 65% | Verify script matches audio; re-run Whisper or regenerate script. |
 | Render OOM / fails | Reduce `REMOTION_PARALLEL` and ensure output directory has space. |
 
-## 8. Deployment Checklist
+## 8. Testing
+
+`npm test` runs 19 offline suites plus `tsc --noEmit`, covering all critical paths. `npm run test:fast` runs the same suites except the API integration test and the TypeScript check (18 suites) for a quicker loop.
+
+| Suite | What it guards |
+|-------|---------------|
+| `test_subtitle_parsing.js` | SRT parsing, cue segmentation, word-level validation |
+| `test_sync_timing.js` | Time parsing, offsets, sync validation, frame/time conversion |
+| `test_keyword_matcher.js` | Scene style matching, keyword extraction, subtitle formatting |
+| `test_extract_title.js` | Title extraction at clause boundaries |
+| `test_karaoke_words.js` | Word-level alignment, hero moment location, phrase sanitization |
+| `test_audio_pipeline.js` | SFX synthesis, BGM config, asset validation |
+| `test_scene_motion.js` | Scene window, Ken Burns transforms, transition rotation |
+| `test_overlay_layout.js` | Layout presets, sequence rotation, holdCues |
+| `test_hero_state.js` | Hero entrance/dwell/exit timeline |
+| `test_versioning.js` | Config hashing, invalidation phase, workdir reuse, duration aggregation |
+| `test_caption_dna.js` | Six DNA file integrity, field validation, `sanitizeOutputName` |
+| `test_validate_subtitles.js` | `validate_subtitles.js` CLI directly (exit codes, stderr, word-level checks) |
+| `test_validate_article.js` | Article quality pre-check (length, code/table share, Chinese ratio; stub-script injection) |
+| `test_scene_visuals_cache.js` | Scene asset cache (hash hit, symlink, LRU eviction) |
+| `test_api_server.js` | Full API integration (CRUD, run/rebuild/retry, versioning, auth, webhook, SSE keepalive, multi-host, article pre-check, schedule/trigger, script versions, preview) |
+| `test_pipeline_state.sh` | Pipeline state machine (init/get/set/mark, concurrency, corruption recovery) |
+| `test_validate_config.sh` | Caption DNA id pre-flight validation (accept valid, reject invalid) |
+| `test_remote_job.sh` | Remote job helpers (SSH/SCP, submit, poll, circuit breaker, worker pool, PID extraction under noisy numeric banners) |
+| `test_compositions.js` | Remotion composition registration guard (portrait/landscape/square dimensions) |
+| `tsc --noEmit` | TypeScript type checking |
+
+Visual regression (`npm run test:visual`) uses SSIM pixel comparison for three representative frames.
+
+## 9. Web Admin Resilience
+
+- **Webhook delivery persistence**: each version record carries `webhookDelivery {status, attempts, lastAttemptAt, lastError}`. Every attempt is persisted, so a process restart no longer loses pending deliveries — at startup the server scans version records for `status === 'pending'` on terminal versions and resumes them; `delivered` records are skipped, preventing duplicates after restart.
+- **Job list caching**: `api/job-store.js` caches `listJobs`/`getJob` results in memory, invalidated by `state.json` mtime, so the list endpoint no longer re-reads every job file per request.
+- **Pipeline state fingerprint cache**: `api/server.js` caches the parsed `.pipeline_state.json` keyed by an `(mtimeMs, size)` fingerprint; the SSE progress watcher and the job detail endpoint re-parse only when the file actually changes.
+- **SSE keepalive**: comment frames every 25 s by default, overridable via `SSE_KEEPALIVE_MS` (tests use a short interval to assert keepalive frames).
+- **Scheduled jobs**: cron schedules (`node-cron`) are restored from persisted job state at startup; a tick is skipped while the job is active. External triggers (`POST /api/v1/trigger/<token>`) are registered before the auth middleware — the token itself is the credential.
+
+## 10. Deployment Checklist
 
 For a brand-new GPU server:
 

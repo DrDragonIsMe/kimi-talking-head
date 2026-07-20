@@ -24,6 +24,14 @@
 - **标题卡 + 封面图**：首帧 2 秒标题卡，同时输出 1080×1920 封面 PNG。
 - **断点续跑**：每个阶段写入 `temp/<run>/.pipeline_state.json`，失败后可原地重跑。
 - **媒体复用**：只改标题/风格时，可复用已有的 TTS 音频和原始唇形视频，跳过昂贵的 GPU 步骤。
+- **多比例输出**：`video_layout.aspect` 支持 `9:16`（默认 1080×1920）/ `16:9`（1920×1080）/ `1:1`（1080×1080 正方形），pipeline 自动选择对应 Remotion composition。
+- **多主播**：每个任务可选择 `config/hosts/` 下的主播 profile（照片/音色/品牌文案独立），执行时经 `HOST_PROFILE` 环境变量注入 pipeline。
+- **文章质量预检**：建任务与 pipeline `script` 阶段前自动检查文章长度、代码块/表格占比、中文占比，提前拦截不适合口播的输入。
+- **成本预估**：Run 前按文章长度与配置估算 LLM token 与各阶段耗时，详情页 Run 按钮旁展示。
+- **渐进式预览**：`video_layout.preview.enabled=true` 时 render 阶段先出 0.33 倍低清预览（跳过 BGM/音效），SSE 推送后即可在线播放，成品就绪自动替换。
+- **定时任务与外部触发**：任务可绑定 cron 定时调度（node-cron），或通过 `POST /api/v1/trigger/<token>` 由外部系统触发。
+- **口播稿版本**：每次保存口播稿自动备份历史版本（`script.v{N}.txt`），可随时只读回溯。
+- **场景素材缓存**：Pexels/AI 场景素材按 query/prompt 哈希全局缓存（`public/scene_visuals/_cache/`，LRU 上限 500 文件/2GB），跨任务去重。
 
 ---
 
@@ -154,6 +162,7 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 | 强制重跑字幕阶段 | `FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video` |
 | 预览 Remotion 组件 | `npm run dev` |
 | TypeScript 检查 | `npm run build` |
+| 全量测试 / 快速回归 | `npm test` / `npm run test:fast` |
 | 启动 Web 管理后台 | `npm run web`（http://localhost:3456） |
 
 ---
@@ -162,33 +171,99 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 
 `npm run web`（等价 `npm run api`）启动管理后台，浏览器打开 http://localhost:3456：
 
-- **任务列表**：状态徽章（draft/queued/running/completed/failed/cancelled）、9 阶段进度条、行内停止/删除，运行中自动轮询。
-- **新建任务**：粘贴文章或上传 `.md/.txt`，可直接运行或存为草稿后再调参。
+- **任务列表**：状态徽章（draft/queued/running/completed/failed/cancelled）、9 阶段进度条、行内停止/删除；支持按任务名搜索；SSE 实时推送刷新（服务端 watcher 跟踪阶段与日志指纹，运行中进度也实时；断线自动回退 3s 轮询）。
+- **新建任务**：粘贴文章或上传 `.md/.txt`，创建草稿后进入详情页调参，确认无误再点 Run 执行（参数在每次执行时才合并生效）；高级配置自动预填上次项目的 overrides（可改）；支持批量模式（多篇文章用单独一行 `---` 分隔，自动编号命名）与配置模板套用；可选主播（下拉数据源为 `config/hosts/` 下的 profile，对应 `hostProfile` 字段）与 cron 定时。创建时自动做文章质量预检，不通过返回 400（`ARTICLE_VALIDATE_MODE=warn` 时降级为警告）。
 - **任务详情**：
-  - **Run** 全量重跑 / **Rebuild** 复用已有音频与唇形视频快速重渲（样式迭代不走 GPU）/ **Stop** / **Clone** 克隆变体 / **Delete**（可选同时清理产物）。
-  - 在线 Preview（支持拖动进度）+ 封面 + 下载；阶段步进器 + 实时日志。
-  - 分组参数表单（字幕 DNA/字号、布局预设/卡片缩放、BGM/音效、标题覆盖），写入任务级 `configOverrides`，与 `config/host_profile.json` 深合并；支持裸 JSON 高级模式。
+  - **Run** 全量重跑 / **Rebuild** 仅重渲 render 阶段（零 GPU 零 LLM）/ **重建 v(N+1)** 配置变更后按阶段复用重跑 / **Stop** / **Clone** 克隆变体 / **Delete**（可选同时清理产物）；按钮下方显示执行预估（近 20 次平均耗时，无样本时回退静态文案），Run 按钮旁另显示成本预估（按文章长度与配置估算的 LLM token 与各阶段耗时）。
+  - 失败重试：最新版本失败时显示「重试」（断点续跑）与「指定阶段重跑」（`FORCE_<PHASE>=1` 定点重跑）。
+  - 版本化运行：每次 run/rebuild 生成新版本（v1=outputName，vN=`<outputName>_vN`），旧版本产物保留；版本 chips 可切换预览/下载历史版本；≥2 个已完成版本时可展开「版本对比」，A/B 并排同步播放与拖动。
+  - 阶段复用（没改的不重跑）：按文章与配置 diff 推导最早失效阶段（文章→script、voice→tts、字幕 segmentation→subtitles、scene_visuals→visuals、其它→render），克隆上一版本工作目录后只重跑失效及之后的阶段；阶段步进器每格显示耗时。
+  - 口播稿微调：详情页直接编辑最新版本的 `script.txt`，可「从字幕重跑」（微调，不耗 GPU）或「从配音重跑」（改动大，耗 GPU）；每次保存自动备份为 `script.v{N}.txt`，版本下拉可只读查看历史版本。
+  - 定时任务：详情页可设置/删除 cron 定时（node-cron 调度，服务重启后自动恢复，任务活跃中跳过本轮），并展示外部触发 URL（`POST /api/v1/trigger/<token>`，token 即凭证、无需 Bearer 鉴权），一键复制。
+  - 配置模板：参数面板可「套用模板」（深合并进当前 overrides）、「存为模板」、「删除模板」；模板存于 `api/templates.json`（用户数据，不入 git）。
+  - 在线 Preview（支持拖动进度）+ 封面 + 下载；实时日志。开启 `video_layout.preview.enabled` 时，render 阶段早期产出的低清预览（`temp/<run>/preview.mp4`）经 SSE 推送后先行可播，成品就绪自动替换。
+  - 分组参数表单（字幕 DNA/字号、画面比例、布局预设/卡片缩放、BGM/音效、标题覆盖），写入任务级 `configOverrides`，与 `config/host_profile.json` 深合并；支持裸 JSON 高级模式。
   - 文章在线编辑。
+- **多比例输出**：`video_layout.aspect` 支持三种比例——默认 `9:16` 竖屏（1080×1920）；`16:9` 横屏（1920×1080，`TalkingHeadVideoLandscape`：左场景画面、右竖长主播窗、底部全宽字幕条 + 横屏两栏标题卡）；`1:1` 正方形（1080×1080，`TalkingHeadVideoSquare`）。
+- **素材库**（导航「素材库」，`#/assets`）：场景画面按 run 分组缩略图浏览、BGM 在线试听并可一键「应用到当前任务」（写入 `style.bgm`）、主播 profile 展示（新建任务可直接选用）。
 
-> ⚠️ 后台无鉴权，仅面向本机使用，不要暴露到公网。
+> ⚠️ 后台默认无鉴权，仅面向本机使用；要暴露到非本机环境，先设置 `WEB_TOKENS` 启用多用户鉴权（见下）。
+
+### 鉴权与多用户（P2-10，可选）
+
+设置环境变量后重启后台即启用：
+
+```bash
+WEB_TOKENS="alice:tokenA,bob:tokenB" npm run web
+```
+
+- 所有 `/api/*` 与 `/assets/*` 路由要求 `Authorization: Bearer <token>`（媒体标签与 EventSource 用 `?access_token=` 回退）；`/health` 与静态页面保持公开。
+- 任务按用户隔离：他人任务一律 404；模板分用户存储（`api/templates.<user>.json`）。
+- 前端自动处理：fetch 自动带 token，401 时弹出令牌输入框（localStorage 持久化）。
+- 未设置 `WEB_TOKENS` 时行为与之前完全一致（默认本机开发）。
+
+### Webhook（P2-11）
+
+任务创建（含批量）或 PATCH 时可设置 `webhookUrl`（http(s)，≤2048 字符）。每当一个版本到达终态（completed/failed/cancelled），后台向其 POST JSON `{jobId, outputName, version, status, error, finishedAt}`，最多 3 次尝试（1s/3s 退避，5s 超时）；失败不阻塞任务，最终写入该任务的 stderr 日志。投递状态持久化在版本记录的 `webhookDelivery {status, attempts, lastAttemptAt, lastError}` 字段中：服务重启后会自动恢复未完成的 `pending` 投递，已 `delivered` 的版本不会重复投递。全部端点见根目录 `openapi.yaml`（OpenAPI 3.0，v2.3.0）。
+
+### 多主播切换
+
+`config/hosts/` 下放置额外的主播 profile JSON（结构与 `config/host_profile.json` 相同）。新建任务时选择主播（API 字段 `hostProfile`，仅接受 `config/hosts/` 下已存在的纯 `.json` 文件名）；执行时后端以 `HOST_PROFILE` 绝对路径注入 pipeline。优先级：pipeline 第 3 个位置参数 > `HOST_PROFILE` 环境变量 > `config/host_profile.json`。
+
+### 成本预估
+
+`GET /api/v1/jobs/:id` 返回 `costEstimate`（由 `api/versioning.js` 的 `estimateCost(articleText, configOverrides)` 计算）：按文章字数与配置估算 LLM token（口播稿/分镜）与各阶段秒数（TTS/唇形/渲染/总计），前端在 Run 按钮旁展示。仅为启发式估算值，非计费依据。
+
+### 渐进式预览
+
+`video_layout.preview.enabled=true` 时，render 阶段先以 `--scale=0.33` 渲染低清 `temp/<run>/preview.mp4`（跳过 BGM/音效，失败不阻塞正式渲染）；后端 watcher 检测到文件后经 SSE 推 `preview_ready`，前端立即显示预览播放器，成品就绪自动替换。`GET /api/v1/jobs/:id/preview` 提供预览流（支持 Range）。
+
+### 定时任务与外部触发
+
+- `POST /api/v1/jobs/:id/schedule` `{cron}` 设置定时（node-cron 校验，5 或 6 段表达式），`DELETE` 同路径移除；创建任务时也可直接携带 `schedule`。服务启动时自动恢复所有定时，任务活跃中跳过本轮。
+- 每个任务创建时自动生成 `triggerToken`；`POST /api/v1/trigger/<token>` 无需 Bearer 鉴权（token 即凭证，路由注册在鉴权中间件之前），命中即发起一次全量 run（活跃中返回 409）。详情页可复制触发 URL。
+
+### GPU 资源池（P2-12，可选）
+
+`config/servers.json` 可新增 `workers` 数组（见 `config/servers.example.json` 注释示例）：TTS 等远程任务按 round-robin + SSH 可达性预检（ConnectTimeout=5）选 worker，跳过不可达者；未配置或全部不可达时回退 primary/backup 单服务器逻辑，行为与之前一致。
+
+### 数据看板（P2-13）
+
+导航「看板」（`#/stats`）：任务/版本/成功率卡片、近 14 天完成/失败条形图、full/rebuild 平均耗时、失败阶段分布（读最新失败版本工作目录的 state 文件，best-effort）。
 
 ### HTTP API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/v1/jobs` | 创建任务：multipart（`article` 文件）或 JSON `{outputName, articleText, config, run}`；`run:false` 存草稿 |
+| `POST` | `/api/v1/jobs` | 创建任务：multipart（`article` 文件）或 JSON `{outputName, articleText, config, run, webhookUrl, hostProfile, schedule}`；`run:false` 存草稿；文章质量预检不通过返回 400（`ARTICLE_VALIDATE_MODE=warn` 降级为警告，`ARTICLE_VALIDATE_SCRIPT` 可覆盖校验脚本路径） |
+| `POST` | `/api/v1/jobs/batch` | 批量创建：`{items: [{outputName?, articleText, config?}], run}`；逐条返回 `{ok, job|error}`，单条失败不中断 |
 | `GET` | `/api/v1/jobs` | 任务列表（含阶段进度、hasMedia、队列位置） |
-| `GET` | `/api/v1/jobs/:id` | 任务详情（含完整阶段状态、configOverrides、文章） |
+| `GET` | `/api/v1/jobs/:id` | 任务详情（含完整阶段状态、configOverrides、文章、versions、configDirty、hostProfile、schedule、triggerToken、costEstimate） |
 | `PATCH` | `/api/v1/jobs/:id` | 调整 outputName / configOverrides / 文章（运行中 409） |
-| `DELETE` | `/api/v1/jobs/:id` | 删除任务；`?purge=1` 同时清理 `temp/` 与 `output/` 产物 |
-| `POST` | `/api/v1/jobs/:id/run` | 全量重跑（pipeline.sh） |
-| `POST` | `/api/v1/jobs/:id/rebuild` | 复用媒体快速重渲（render_with_reused_media.sh） |
+| `DELETE` | `/api/v1/jobs/:id` | 删除任务；`?purge=1` 同时清理所有版本的 `temp/` 与 `output/` 产物 |
+| `POST` | `/api/v1/jobs/:id/run` | 新建版本全量重跑（pipeline.sh；N>1 时按 diff 复用上一版本未变更阶段；body 可选 `{fromPhase}` 手动指定失效起点） |
+| `POST` | `/api/v1/jobs/:id/rebuild` | 新建版本（kind=rebuild）仅重渲 render 阶段，零 GPU 零 LLM（需已有音频+唇形视频） |
+| `POST` | `/api/v1/jobs/:id/retry` | 失败重试：同一版本续跑（不产生新版本）；body 可选 `{phase}` 注入 `FORCE_<PHASE>=1` 定点重跑 |
 | `POST` | `/api/v1/jobs/:id/stop` | 停止（排队中取消 / 运行中杀进程组） |
 | `POST` | `/api/v1/jobs/:id/clone` | 克隆任务（可带新 outputName/config/run） |
-| `GET` | `/api/v1/jobs/:id/preview/:file` | 在线预览 video/cover（支持 Range 拖动） |
-| `GET` | `/api/v1/jobs/:id/download/:file` | 下载 video/cover |
+| `GET` | `/api/v1/jobs/:id/script` | 读取最新版本的口播稿 `script.txt`（未生成 404）；`?version=N` 读历史备份 `script.v{N}.txt` |
+| `PUT` | `/api/v1/jobs/:id/script` | 写回口播稿（运行中 409；纯文本不 sanitize；写入前自动备份旧稿为 `script.v{N}.txt`） |
+| `GET` | `/api/v1/jobs/:id/script/versions` | 口播稿历史版本列表 |
+| `GET` | `/api/v1/jobs/:id/preview` | 渐进式低清预览流（`temp/<run>/preview.mp4`，支持 Range；未产出 404） |
+| `POST` | `/api/v1/jobs/:id/schedule` | 设置 cron 定时 `{cron}`（node-cron 校验，非法 400） |
+| `DELETE` | `/api/v1/jobs/:id/schedule` | 移除定时 |
+| `POST` | `/api/v1/trigger/:token` | 外部触发一次全量 run（token 即凭证，注册在鉴权中间件之前；任务活跃中 409） |
+| `GET` | `/api/v1/jobs/:id/preview/:file` | 在线预览 video/cover（支持 Range 拖动；`?version=N` 指定版本，默认最新 completed 版本） |
+| `GET` | `/api/v1/jobs/:id/download/:file` | 下载 video/cover（`?version=N` 同上） |
 | `GET` | `/api/v1/jobs/:id/logs/:type` | stdout/stderr 日志流 |
-| `GET` | `/api/v1/config` | 基础配置（脱敏）+ 表单枚举（字幕 DNA/布局预设/素材类型） |
+| `GET` | `/api/v1/estimates` | 执行预估：最近 20 个已完成版本按 kind 分组的 `{avgSeconds, samples}` |
+| `GET` | `/api/v1/stats` | 数据看板：`{totals, perDay(14d), avgDurationByKind, failureByPhase}`（鉴权开启时按用户隔离） |
+| `GET` | `/api/v1/templates` | 配置模板列表（首次读取写入内置模板「知识科普」「发布会风」） |
+| `POST` | `/api/v1/templates` | 新建/覆盖模板 `{name, overrides}`（name ≤40 字，按名 upsert） |
+| `DELETE` | `/api/v1/templates/:name` | 删除模板 |
+| `GET` | `/api/v1/events` | SSE 事件流：job 状态变更推送 `{type:'job', jobId, status, latestVersion}`；低清预览产出推送 `{type:'preview_ready', jobId, runName, preview}`；25s 注释帧保活（`SSE_KEEPALIVE_MS` 可调） |
+| `GET` | `/api/v1/assets` | 素材库清单：场景画面（按 run 分组）+ BGM + 主播 profile；文件经 `/assets/scene/*`、`/assets/bgm/*` 静态挂载（containment + 扩展名白名单） |
+| `GET` | `/api/v1/config` | 基础配置（脱敏）+ 表单枚举（字幕 DNA/布局预设/素材类型/画面比例）+ `lastJobOverrides`（最近任务的 overrides，供新建预填） |
 
 并发由 `MAX_CONCURRENT`（默认 1）控制，多余任务进入队列。
 
@@ -220,6 +295,8 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 - `voice.reference_audio`：参考音频路径
 - `template`：`editorial` 或 `product-launch`
 - `video_layout.mode`：`portrait-hybrid`
+- `video_layout.aspect`：`9:16`（默认 1080×1920）/ `16:9`（1920×1080）/ `1:1`（1080×1080），pipeline 按此选择 composition
+- `video_layout.preview.enabled`：渐进式预览开关（默认 `false`），render 阶段先产 0.33 倍低清 `preview.mp4`
 - `video_layout.hybrid.preset`：`default | host-focus | visual-focus | minimal | balanced`
 - `title_card.title` / `title_card.duration_seconds`
 - `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）。hero 关键词全屏时刻由 `HeroOverlay` 统一渲染，任意 DNA 下都会与入场音效同步出现
@@ -301,10 +378,36 @@ npm run build      # TypeScript 检查
 
 | 目的 | 命令 |
 |------|------|
-| 全部离线套件 + 类型检查 | `npm test` |
+| 全部离线套件 + 类型检查 | `npm test`（19 套件 + `tsc`，含字幕/同步/关键词/标题/卡拉OK/音频/场景运动/布局/hero/版本化/DNA/字幕校验/文章预检/素材缓存/API/状态机/DNA 配置校验/远程任务/组合守卫/TS 类型检查） |
+| 快速回归（跳过 API 集成与 tsc） | `npm run test:fast`（18 套件） |
 | 视觉回归（SSIM 像素对比） | `npm run test:visual` |
 | 有意变更模板后重落基线 | `UPDATE_BASELINE=1 npm run test:visual` |
 | 单独跑某个套件 | `node scripts/test_karaoke_words.js` 等 |
+
+测试套件一览：
+
+| 文件 | 覆盖范围 |
+|------|---------|
+| `test_subtitle_parsing.js` | SRT 解析、分段、校验（含词级时间戳） |
+| `test_sync_timing.js` | 时间解析、偏移、同步校验、帧时间转换 |
+| `test_keyword_matcher.js` | 场景风格匹配、关键词提取、字幕格式化 |
+| `test_extract_title.js` | 标题提取、分句边界拆分 |
+| `test_karaoke_words.js` | 词级对齐、hero 定位、sanitize |
+| `test_audio_pipeline.js` | SFX 合成、BGM 配置、素材校验 |
+| `test_scene_motion.js` | 场景窗口、Ken Burns 运动、转场轮换 |
+| `test_overlay_layout.js` | 布局预设、序列轮换、holdCues |
+| `test_hero_state.js` | hero 入场/驻留/退场时间轴 |
+| `test_versioning.js` | hash、stableStringify、失效阶段推导、工作目录复用、耗时聚合 |
+| `test_caption_dna.js` | 六套 DNA 文件完整性、字段校验、sanitizeOutputName |
+| `test_validate_subtitles.js` | `validate_subtitles.js` CLI 直测（退出码、stderr、词级时间戳校验） |
+| `test_validate_article.js` | 文章质量预检（长度/代码块/表格/中文占比，stub 脚本注入） |
+| `test_scene_visuals_cache.js` | 场景素材缓存（hash 命中、符号链接、LRU 清理） |
+| `test_api_server.js` | 完整 API 集成测试（CRUD/run/rebuild/retry/版本化/鉴权/webhook/SSE 保活/多主播/文章预检/定时与 trigger/口播稿版本/预览） |
+| `test_pipeline_state.sh` | 流水线状态机（init/get/set/mark/并发/容错） |
+| `test_validate_config.sh` | DNA id 合法性预检（有效放行、无效报错退出） |
+| `test_remote_job.sh` | 远端任务（SSH/SCP/提交/轮询/熔断/worker 池/数字 banner 干扰下的 PID 提取） |
+| `test_compositions.js` | Remotion 组合注册守卫（竖屏/横屏/正方形尺寸） |
+| `tsc --noEmit` | TypeScript 类型检查 |
 
 渲染指定视频（高级）：
 

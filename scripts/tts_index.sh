@@ -28,7 +28,35 @@ REF_BASENAME=$(basename "$REFERENCE_AUDIO")
 
 # Pick a server that actually has IndexTTS installed (remote_worker.py present).
 # Primary may only host InfiniteTalk lip-sync, so fall back to backup when needed.
+# workers 池（P2-12）优先：remote_job_select_worker 做 round-robin + 可达性预检；
+# 未配置 workers 时函数直接回退 primary，下面的 primary/backup 循环语义不变。
 pick_tts_server() {
+    local sel sel_key host port user tts_path workspace
+    if sel=$(remote_job_select_worker "$CONFIG"); then
+        sel_key=$(echo "$sel" | cut -d' ' -f1)
+        host=$(echo "$sel" | cut -d' ' -f2)
+        port=$(echo "$sel" | cut -d' ' -f3)
+        user=$(echo "$sel" | cut -d' ' -f4)
+        if [ "$sel_key" = "primary" ]; then
+            tts_path=$(jq -r '.primary.tts_path // empty' $CONFIG)
+            workspace=$(jq -r '.primary.tts_workspace // empty' $CONFIG)
+        else
+            tts_path=$(jq -r ".workers[$sel_key].tts_path // empty" $CONFIG)
+            workspace=$(jq -r ".workers[$sel_key].tts_workspace // empty" $CONFIG)
+        fi
+        if [ -n "$tts_path" ] && [ "$tts_path" != "null" ]; then
+            if ssh -p "$port" $SSH_OPTS "$user@$host" "[ -f \"$tts_path/remote_worker.py\" ]" 2>/dev/null; then
+                echo "${sel_key}:${host}:${port}:${user}:${workspace}:${tts_path}"
+                return 0
+            fi
+            # 只有真正从 workers 池选出节点时才需要回退；本来就是 primary 时提示语义要准确
+            if [ "$sel_key" != "primary" ]; then
+                echo "⚠️ workers[$sel_key] ($host) 缺少 remote_worker.py 或不可达，回退 primary/backup 选择逻辑" >&2
+            else
+                echo "⚠️ primary ($host) 缺少 remote_worker.py 或 SSH 不可达，继续尝试 backup" >&2
+            fi
+        fi
+    fi
     for key in primary backup; do
         local host port user tts_path workspace
         host=$(jq -r ".${key}.host" $CONFIG)
@@ -43,13 +71,15 @@ pick_tts_server() {
             echo "${key}:${host}:${port}:${user}:${workspace}:${tts_path}"
             return 0
         fi
+        echo "⚠️ ${key} ($host) 缺少 remote_worker.py 或 SSH 不可达" >&2
     done
     return 1
 }
 
-SERVER_INFO=$(pick_tts_server)
+SERVER_INFO=$(pick_tts_server) || true
 if [ -z "$SERVER_INFO" ]; then
-    echo "❌ 找不到可用的 IndexTTS 服务器（remote_worker.py 不存在）" >&2
+    echo "❌ 找不到可用的 IndexTTS 服务器（remote_worker.py 不存在或 SSH 不可达）" >&2
+    echo "   排查: bash scripts/check_server.sh；或确认 config/servers.json 的 primary/backup/workers 配置" >&2
     exit 1
 fi
 
@@ -59,10 +89,15 @@ PORT=$(echo "$SERVER_INFO" | cut -d: -f3)
 USER=$(echo "$SERVER_INFO" | cut -d: -f4)
 WORKSPACE=$(echo "$SERVER_INFO" | cut -d: -f5)
 TTS_PATH=$(echo "$SERVER_INFO" | cut -d: -f6)
-TTS_VENV=$(jq -r ".${SERVER_KEY}.tts_python_env" $CONFIG)
+# SERVER_KEY 为数字时是 workers 数组下标，否则是 primary/backup
+if [[ "$SERVER_KEY" =~ ^[0-9]+$ ]]; then
+    TTS_VENV=$(jq -r ".workers[$SERVER_KEY].tts_python_env // empty" $CONFIG)
+else
+    TTS_VENV=$(jq -r ".${SERVER_KEY}.tts_python_env" $CONFIG)
+fi
 remote_job_init "$HOST" "$PORT" "$USER"
 
-echo "🎙️ 上传参考音频到服务器（$SERVER_KEY: $HOST:$PORT）..."
+echo "🎙️ 上传参考音频到服务器（$SERVER_KEY: $HOST:${PORT}）..."
 REMOTE_DIR="$WORKSPACE/voice_ref"
 ssh -p "$PORT" $SSH_OPTS "$USER@$HOST" "mkdir -p $REMOTE_DIR"
 scp -P "$PORT" $SSH_OPTS "$REFERENCE_AUDIO" "$USER@$HOST:$REMOTE_DIR/$REF_BASENAME"

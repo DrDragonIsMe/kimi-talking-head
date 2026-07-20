@@ -22,6 +22,8 @@ interface TitleCardProps {
   theme?: ThemeConfig;
   sceneVisuals?: SceneVisual[];
   features?: string[];
+  /** 画面比例：9:16 竖屏（默认）/ 16:9 横屏（居中两栏变体）/ 1:1 正方形（竖向堆叠变体） */
+  aspect?: '9:16' | '16:9' | '1:1';
 }
 
 const FONT_FAMILY = '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -47,6 +49,7 @@ export const TitleCard: React.FC<TitleCardProps> = ({
   theme,
   sceneVisuals = [],
   features = [],
+  aspect = '9:16',
 }) => {
   const frame = useCurrentFrame();
 
@@ -55,7 +58,6 @@ export const TitleCard: React.FC<TitleCardProps> = ({
       <ProductLaunchTitleCard
         title={title}
         subtitle={subtitle}
-        durationFrames={durationFrames}
         primaryColor={primaryColor}
         secondaryColor={secondaryColor}
         brand={brand}
@@ -64,6 +66,42 @@ export const TitleCard: React.FC<TitleCardProps> = ({
         features={features}
         theme={theme}
         sceneVisuals={sceneVisuals}
+      />
+    );
+  }
+
+  // 横屏 16:9：居中两栏变体（左文案、右主播画面）
+  if (aspect === '16:9') {
+    return (
+      <LandscapeTitleCard
+        title={title}
+        subtitle={subtitle}
+        primaryColor={primaryColor}
+        secondaryColor={secondaryColor}
+        brand={brand}
+        tagline={tagline}
+        pills={pills}
+        coverMeta={coverMeta}
+        hostVideoPath={hostVideoPath}
+        frame={frame}
+      />
+    );
+  }
+
+  // 正方形 1:1：竖向堆叠变体（上文案、下主播画面）
+  if (aspect === '1:1') {
+    return (
+      <SquareTitleCard
+        title={title}
+        subtitle={subtitle}
+        primaryColor={primaryColor}
+        secondaryColor={secondaryColor}
+        brand={brand}
+        tagline={tagline}
+        pills={pills}
+        coverMeta={coverMeta}
+        hostVideoPath={hostVideoPath}
+        frame={frame}
       />
     );
   }
@@ -492,7 +530,6 @@ export const TitleCard: React.FC<TitleCardProps> = ({
 const ProductLaunchTitleCard: React.FC<{
   title: string;
   subtitle?: string;
-  durationFrames: number;
   primaryColor: string;
   secondaryColor: string;
   brand: string;
@@ -504,7 +541,6 @@ const ProductLaunchTitleCard: React.FC<{
 }> = ({
   title,
   subtitle,
-  durationFrames,
   primaryColor,
   secondaryColor,
   brand,
@@ -707,6 +743,416 @@ const ProductLaunchTitleCard: React.FC<{
               </div>
             );
           })}
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+/**
+ * 横屏 16:9（1920×1080）标题卡：居中两栏——左侧品牌/标题/摘要/特性胶囊，右侧主播画面。
+ * 简单适配竖屏设计语言（同款色板与动效曲线），不引入新组件体系。
+ */
+const LandscapeTitleCard: React.FC<{
+  title: string;
+  subtitle?: string;
+  primaryColor: string;
+  secondaryColor: string;
+  brand: string;
+  tagline: string;
+  pills: string[];
+  coverMeta?: TitleCardProps['coverMeta'];
+  hostVideoPath: string;
+  frame: number;
+}> = ({
+  title,
+  subtitle,
+  primaryColor,
+  secondaryColor,
+  brand,
+  tagline,
+  pills,
+  coverMeta,
+  hostVideoPath,
+  frame,
+}) => {
+  const opacity = interpolate(frame, [0, 16], [0, 1], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+  const leftOpacity = interpolate(frame, [6, 22], [0, 1], {
+    extrapolateRight: 'clamp',
+  });
+  const leftY = interpolate(frame, [6, 22], [26, 0], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+  const rightOpacity = interpolate(frame, [12, 28], [0, 1], {
+    extrapolateRight: 'clamp',
+  });
+  const rightX = interpolate(frame, [12, 28], [30, 0], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+  const accentWidth = interpolate(frame, [18, 36], [120, 280], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+
+  const titleLength = title.replace(/\s+/g, '').length;
+  const titleFontSize = titleLength > 18 ? 56 : titleLength > 12 ? 68 : 80;
+  const summary = coverMeta?.summary || subtitle || '以文章核心结论生成封面摘要。';
+  const featurePills = (pills.length > 0 ? pills : DEFAULT_PILLS).slice(0, 4);
+
+  return (
+    <AbsoluteFill
+      style={{
+        opacity,
+        fontFamily: FONT_FAMILY,
+        background: `
+          radial-gradient(circle at 86% 20%, ${primaryColor}18 0%, transparent 24%),
+          radial-gradient(circle at 16% 82%, ${secondaryColor}10 0%, transparent 22%),
+          linear-gradient(180deg, ${CREAM} 0%, #f4f4f0 100%)
+        `,
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundImage: `
+            linear-gradient(rgba(21,26,25,0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(21,26,25,0.02) 1px, transparent 1px)
+          `,
+          backgroundSize: '64px 64px',
+          opacity: 0.32,
+        }}
+      />
+
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '72px 88px',
+          gap: 72,
+        }}
+      >
+        {/* 左：文案栏 */}
+        <div
+          style={{
+            flex: '1 1 auto',
+            minWidth: 0,
+            opacity: leftOpacity,
+            transform: `translateY(${leftY}px)`,
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 14,
+              padding: '12px 18px',
+              borderRadius: 16,
+              background: CREAM,
+              border: '1px solid rgba(21,26,25,0.08)',
+              boxShadow: '0 14px 28px rgba(21,26,25,0.06)',
+            }}
+          >
+            <img
+              src={staticFile('logo.png')}
+              alt="logo"
+              style={{ width: 34, height: 34, objectFit: 'contain' }}
+            />
+            <div>
+              <div style={{ color: INK, fontSize: 24, fontWeight: 800, lineHeight: 1.1 }}>{brand}</div>
+              <div style={{ color: 'rgba(21,26,25,0.62)', fontSize: 16, marginTop: 4 }}>{tagline}</div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 30,
+              fontSize: titleFontSize,
+              fontWeight: 500,
+              lineHeight: 1.1,
+              color: INK,
+              letterSpacing: -1,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {title}
+          </div>
+
+          <div
+            style={{
+              marginTop: 22,
+              width: accentWidth,
+              height: 6,
+              borderRadius: 999,
+              background: primaryColor,
+            }}
+          />
+
+          <div
+            style={{
+              marginTop: 26,
+              maxWidth: 880,
+              color: 'rgba(21,26,25,0.72)',
+              fontSize: 28,
+              lineHeight: 1.55,
+              fontWeight: 500,
+            }}
+          >
+            {summary}
+          </div>
+
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 34 }}>
+            {featurePills.map((pill) => (
+              <div
+                key={pill}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: 999,
+                  background: TILE,
+                  border: '1px solid rgba(21,26,25,0.08)',
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: INK,
+                }}
+              >
+                {pill}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 右：主播画面卡 */}
+        <div
+          style={{
+            flex: '0 0 400px',
+            height: 640,
+            opacity: rightOpacity,
+            transform: `translateX(${rightX}px)`,
+            borderRadius: 28,
+            overflow: 'hidden',
+            background: TILE_STRONG,
+            border: '1px solid rgba(21,26,25,0.08)',
+            boxShadow: '0 28px 60px rgba(21,26,25,0.14)',
+          }}
+        >
+          <OffthreadVideo
+            src={staticFile(hostVideoPath)}
+            muted
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+/**
+ * 正方形 1:1（1080×1080）标题卡：竖向堆叠——品牌行、标题、摘要、特性胶囊，底部主播画面卡。
+ * 沿用横屏变体的色板与动效曲线，不引入新组件体系。
+ */
+const SquareTitleCard: React.FC<{
+  title: string;
+  subtitle?: string;
+  primaryColor: string;
+  secondaryColor: string;
+  brand: string;
+  tagline: string;
+  pills: string[];
+  coverMeta?: TitleCardProps['coverMeta'];
+  hostVideoPath: string;
+  frame: number;
+}> = ({
+  title,
+  subtitle,
+  primaryColor,
+  secondaryColor,
+  brand,
+  tagline,
+  pills,
+  coverMeta,
+  hostVideoPath,
+  frame,
+}) => {
+  const opacity = interpolate(frame, [0, 16], [0, 1], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+  const leftOpacity = interpolate(frame, [6, 22], [0, 1], {
+    extrapolateRight: 'clamp',
+  });
+  const leftY = interpolate(frame, [6, 22], [26, 0], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+  const rightOpacity = interpolate(frame, [12, 28], [0, 1], {
+    extrapolateRight: 'clamp',
+  });
+  const rightY = interpolate(frame, [12, 28], [30, 0], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+  const accentWidth = interpolate(frame, [18, 36], [120, 280], {
+    extrapolateRight: 'clamp',
+    easing: Easing.out(Easing.cubic),
+  });
+
+  const titleLength = title.replace(/\s+/g, '').length;
+  const titleFontSize = titleLength > 18 ? 52 : titleLength > 12 ? 64 : 76;
+  const summary = coverMeta?.summary || subtitle || '以文章核心结论生成封面摘要。';
+  const featurePills = (pills.length > 0 ? pills : DEFAULT_PILLS).slice(0, 4);
+
+  return (
+    <AbsoluteFill
+      style={{
+        opacity,
+        fontFamily: FONT_FAMILY,
+        background: `
+          radial-gradient(circle at 84% 14%, ${primaryColor}18 0%, transparent 24%),
+          radial-gradient(circle at 18% 84%, ${secondaryColor}10 0%, transparent 22%),
+          linear-gradient(180deg, ${CREAM} 0%, #f4f4f0 100%)
+        `,
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundImage: `
+            linear-gradient(rgba(21,26,25,0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(21,26,25,0.02) 1px, transparent 1px)
+          `,
+          backgroundSize: '64px 64px',
+          opacity: 0.32,
+        }}
+      />
+
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '64px 72px',
+        }}
+      >
+        {/* 上：文案区 */}
+        <div
+          style={{
+            opacity: leftOpacity,
+            transform: `translateY(${leftY}px)`,
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 14,
+              padding: '12px 18px',
+              borderRadius: 16,
+              background: CREAM,
+              border: '1px solid rgba(21,26,25,0.08)',
+              boxShadow: '0 14px 28px rgba(21,26,25,0.06)',
+            }}
+          >
+            <img
+              src={staticFile('logo.png')}
+              alt="logo"
+              style={{ width: 34, height: 34, objectFit: 'contain' }}
+            />
+            <div>
+              <div style={{ color: INK, fontSize: 24, fontWeight: 800, lineHeight: 1.1 }}>{brand}</div>
+              <div style={{ color: 'rgba(21,26,25,0.62)', fontSize: 16, marginTop: 4 }}>{tagline}</div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 28,
+              fontSize: titleFontSize,
+              fontWeight: 500,
+              lineHeight: 1.1,
+              color: INK,
+              letterSpacing: -1,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {title}
+          </div>
+
+          <div
+            style={{
+              marginTop: 20,
+              width: accentWidth,
+              height: 6,
+              borderRadius: 999,
+              background: primaryColor,
+            }}
+          />
+
+          <div
+            style={{
+              marginTop: 22,
+              maxWidth: 900,
+              color: 'rgba(21,26,25,0.72)',
+              fontSize: 27,
+              lineHeight: 1.5,
+              fontWeight: 500,
+            }}
+          >
+            {summary}
+          </div>
+
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 28 }}>
+            {featurePills.map((pill) => (
+              <div
+                key={pill}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: 999,
+                  background: TILE,
+                  border: '1px solid rgba(21,26,25,0.08)',
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: INK,
+                }}
+              >
+                {pill}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 下：主播画面卡（占满剩余高度） */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            marginTop: 32,
+            opacity: rightOpacity,
+            transform: `translateY(${rightY}px)`,
+            borderRadius: 28,
+            overflow: 'hidden',
+            background: TILE_STRONG,
+            border: '1px solid rgba(21,26,25,0.08)',
+            boxShadow: '0 28px 60px rgba(21,26,25,0.14)',
+          }}
+        >
+          <OffthreadVideo
+            src={staticFile(hostVideoPath)}
+            muted
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
         </div>
       </div>
     </AbsoluteFill>

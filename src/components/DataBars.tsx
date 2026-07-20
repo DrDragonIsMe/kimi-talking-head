@@ -5,7 +5,6 @@ import { matchSceneStyle, extractDataBarTriggerKeywords, findTriggerCue } from '
 import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
 import type { ContentOverlayConfig, DataBarItem } from '../index';
 
-const CREAM = '#FAFAF7';
 const TILE_STRONG = '#E3E9E7';
 const INK = '#151A19';
 

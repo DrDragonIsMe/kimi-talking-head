@@ -68,7 +68,7 @@ export const FallingChapterCards: React.FC<FallingChapterCardsProps> = ({
         width: scaledCardWidth,
       }}
     >
-      {visibleChapters.map(({ chapter, index }, listIndex) => {
+      {visibleChapters.map(({ chapter, index }) => {
         const isActive = currentTime >= chapter.start && currentTime < chapter.end;
         const isPast = currentTime >= chapter.end;
 

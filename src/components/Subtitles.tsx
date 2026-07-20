@@ -14,11 +14,11 @@ const TILE_STRONG = '#E3E9E7';
 const INK = '#151A19';
 
 /**
- * hybrid-bottom 字幕卡片宽 960px、水平 padding 各 36px，文本可用宽度 888px。
+ * hybrid-bottom 字幕卡片默认宽 960px（可用 cardWidth 覆盖，横屏 16:9 用 1200）、水平 padding 各 36px。
  * 换行预算与字号选择都按这个像素宽度推导：whiteSpace 为 nowrap 的行一旦超过
  * 可用宽度就不会居中，而是钉在左缘向右溢出（看起来整条字幕偏右、甚至被裁掉）。
  */
-const HYBRID_CONTENT_WIDTH = 960 - 36 * 2;
+const HYBRID_CARD_HORIZONTAL_PADDING = 36;
 /** 与文本容器 letterSpacing 一致，估算行像素宽度时计入 */
 const LETTER_SPACING_PX = 0.5;
 
@@ -29,9 +29,13 @@ interface SubtitlesProps {
   layout?: OverlayLayoutConfig;
   variant?: 'default' | 'hybrid-bottom';
   heroMoments?: HeroMoment[];
+  /** hybrid-bottom 卡片像素宽（默认 960；横屏 16:9 传 1200） */
+  cardWidth?: number;
+  /** hybrid-bottom 卡片距画布底部的像素（默认 160） */
+  cardMarginBottom?: number;
 }
 
-export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config, layout, variant = 'default', heroMoments }) => {
+export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config, layout, variant = 'default', heroMoments, cardWidth, cardMarginBottom }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
   const currentTime = frame / fps;
@@ -43,6 +47,8 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
   const currentCueIndex = getActiveCueIndex(loadedSubtitles, currentTime);
   const overlayLayout = getOverlayLayoutPreset(currentCueIndex, layout);
   const isHybridBottom = variant === 'hybrid-bottom';
+  const hybridCardWidth = cardWidth ?? 960;
+  const hybridContentWidth = hybridCardWidth - HYBRID_CARD_HORIZONTAL_PADDING * 2;
 
   // 词级 DNA：选了非 classic 且当前 cue 带词级时间戳（或有 hero 时刻）时走 karaoke 渲染
   const dna = getCaptionDna(config.dna);
@@ -74,7 +80,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
     .sort((a, b) => normalizedText.indexOf(a) - normalizedText.indexOf(b));
   // hybrid-bottom：按最小档字号推导每行最多容纳的视觉字数，保证任何一行都放得进卡片
   const wrapBudget = isHybridBottom
-    ? Math.max(10, Math.floor(HYBRID_CONTENT_WIDTH / (config.fontSizeSmall + LETTER_SPACING_PX)))
+    ? Math.max(10, Math.floor(hybridContentWidth / (config.fontSizeSmall + LETTER_SPACING_PX)))
     : Math.max(10, config.maxCharsPerLine - 1);
   const subtitleLines = formatSubtitleLines(
     normalizedText,
@@ -90,7 +96,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
       ''
     );
     const fitsLine = (size: number) =>
-      getVisualLength(longestLine) * (size + LETTER_SPACING_PX) <= HYBRID_CONTENT_WIDTH;
+      getVisualLength(longestLine) * (size + LETTER_SPACING_PX) <= hybridContentWidth;
     fontSize = fitsLine(config.fontSizeLarge)
       ? config.fontSizeLarge
       : fitsLine(config.fontSizeMedium)
@@ -162,7 +168,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ srtPath, subtitles, config
           zIndex: Z.captions, // 高于 FallingChapterCards 的 cards 层，避免字幕被章节卡遮挡
         }}
       >
-        <div style={{ width: isHybridBottom ? 960 : overlayLayout.subtitles.width, marginBottom: isHybridBottom ? 160 : 0 }}>
+        <div style={{ width: isHybridBottom ? hybridCardWidth : overlayLayout.subtitles.width, marginBottom: isHybridBottom ? (cardMarginBottom ?? 160) : 0 }}>
           {!isHybridBottom ? (
             <div
               style={{

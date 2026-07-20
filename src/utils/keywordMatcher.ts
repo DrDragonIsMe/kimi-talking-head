@@ -1,3 +1,14 @@
+// 分段/断行逻辑的唯一数据源：scripts/lib/subtitle_segmentation.js
+// （与 scripts/parse_srt.js、src/hooks/useSubtitles.ts 共用，禁止内联副本）
+import {
+  splitByDelimiters,
+  getVisualLength,
+  trimLineForDisplay,
+  forceWrapLines,
+} from '../../scripts/lib/subtitle_segmentation';
+
+export { getVisualLength };
+
 export interface SceneStyle {
   id: string;
   label: string;
@@ -93,7 +104,23 @@ export const DEFAULT_STYLE = SCENE_STYLES.neutral;
 export function normalizeTriggerText(text: string): string {
   return text
     .toLowerCase()
-    .replace(/[\s""''“”‘’]/g, '')
+    // 要剥离的空白与引号字符，正则中显式使用 Unicode 码点（逐字符注释，便于审计遗漏）：
+    //   \s      空白符（空格/制表/换行等）
+    //   \u0022  "  直双引号 QUOTATION MARK
+    //   \u0027  '  直单引号 APOSTROPHE
+    //   \u201C  “  左双引号 LEFT DOUBLE QUOTATION MARK
+    //   \u201D  ”  右双引号 RIGHT DOUBLE QUOTATION MARK
+    //   \u2018  ‘  左单引号 LEFT SINGLE QUOTATION MARK
+    //   \u2019  ’  右单引号 RIGHT SINGLE QUOTATION MARK
+    //   \u300C  「  左直角引号 LEFT CORNER BRACKET（中文/日文常用引号）
+    //   \u300D  」  右直角引号 RIGHT CORNER BRACKET
+    //   \uFF02  ＂  全角双引号 FULLWIDTH QUOTATION MARK
+    //   \uFF07  ＇  全角单引号 FULLWIDTH APOSTROPHE
+    //   \u2039  ‹  左单书名号 SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+    //   \u203A  ›  右单书名号 SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+    //   \u00AB  «  左书名号 LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
+    //   \u00BB  »  右书名号 RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
+    .replace(/[\s\u0022\u0027\u201C\u201D\u2018\u2019\u300C\u300D\uFF02\uFF07\u2039\u203A\u00AB\u00BB]/g, '')
     .replace(/[，、：:；;。！？!?]/g, '');
 }
 
@@ -303,25 +330,6 @@ export function normalizeDisplayText(text: string): string {
     .trim();
 }
 
-function splitByDelimiters(text: string, delimiters: RegExp): string[] {
-  const result: string[] = [];
-  let current = '';
-
-  for (const char of text) {
-    current += char;
-    if (delimiters.test(char)) {
-      result.push(current.trim());
-      current = '';
-    }
-  }
-
-  if (current.trim()) {
-    result.push(current.trim());
-  }
-
-  return result.filter(Boolean);
-}
-
 function balanceLines(chunks: string[], maxLines: number): string[] {
   if (chunks.length === 0) {
     return [];
@@ -347,122 +355,6 @@ function balanceLines(chunks: string[], maxLines: number): string[] {
   }
 
   return lines;
-}
-
-function getCharVisualWidth(char: string): number {
-  if (char === ' ') {
-    return 0.35;
-  }
-
-  if (/[A-Za-z0-9]/.test(char)) {
-    return 0.62;
-  }
-
-  if (/[.,:;!?"'`\-]/.test(char)) {
-    return 0.38;
-  }
-
-  return 1;
-}
-
-export function getVisualLength(text: string): number {
-  return Array.from(text).reduce((sum, char) => sum + getCharVisualWidth(char), 0);
-}
-
-function trimLineForDisplay(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function clampLineByWidth(text: string, maxWidth: number): string {
-  let current = '';
-  let width = 0;
-
-  for (const char of text) {
-    const nextWidth = width + getCharVisualWidth(char);
-    if (nextWidth > maxWidth) {
-      break;
-    }
-    current += char;
-    width = nextWidth;
-  }
-
-  return trimLineForDisplay(current);
-}
-
-function findSplitIndex(text: string, maxWidth: number): number {
-  let width = 0;
-  let lastPreferredBreak = -1;
-  let lastPreferredBreakWidth = 0;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    width += getCharVisualWidth(char);
-
-    if (/[，、：,:；;。！？!? ]/.test(char)) {
-      lastPreferredBreak = i + 1;
-      lastPreferredBreakWidth = width;
-    }
-
-    if (width > maxWidth) {
-      // 只有不超预算的断点才可取：预算之外的标点（如行尾逗号）不能作为断点，
-      // 否则整行会超过 maxWidth
-      if (lastPreferredBreak > 0 && lastPreferredBreakWidth <= maxWidth) {
-        return lastPreferredBreak;
-      }
-      // 硬切：把紧跟的句读标点并入本行（悬挂标点），避免下一行以标点开头
-      let cut = Math.max(1, i);
-      let merged = 0;
-      while (cut < text.length && merged < 2 && /[，、：,:；;。！？!?）)》」』]/.test(text[cut])) {
-        cut++;
-        merged++;
-      }
-      return cut;
-    }
-  }
-
-  return text.length;
-}
-
-function forceWrapLines(text: string, maxLines: number, maxWidth: number): string[] {
-  const remainingLines = Math.max(1, maxLines);
-  let remaining = trimLineForDisplay(text);
-  const lines: string[] = [];
-
-  for (let lineIndex = 0; lineIndex < remainingLines; lineIndex++) {
-    const isLastLine = lineIndex === remainingLines - 1;
-    if (!remaining) {
-      break;
-    }
-
-    if (isLastLine) {
-      if (getVisualLength(remaining) <= maxWidth) {
-        lines.push(trimLineForDisplay(remaining));
-      } else {
-        lines.push(clampLineByWidth(remaining, maxWidth));
-      }
-      break;
-    }
-
-    if (getVisualLength(remaining) <= maxWidth) {
-      lines.push(trimLineForDisplay(remaining));
-      break;
-    }
-
-    const splitIndex = findSplitIndex(remaining, maxWidth);
-    const head = trimLineForDisplay(remaining.slice(0, splitIndex));
-    const tail = trimLineForDisplay(remaining.slice(splitIndex));
-
-    if (!head) {
-      lines.push(clampLineByWidth(remaining, maxWidth));
-      remaining = trimLineForDisplay(remaining.slice(1));
-      continue;
-    }
-
-    lines.push(head);
-    remaining = tail;
-  }
-
-  return lines.filter(Boolean);
 }
 
 export function formatSubtitleLines(text: string, maxLines = 2, maxCharsPerLine = 22): string[] {

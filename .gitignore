@@ -6,6 +6,7 @@
 # Local configuration with secrets / server addresses
 config/host_profile.json
 config/servers.json
+config/hosts/
 
 # Dependencies
 node_modules/
@@ -24,10 +25,13 @@ public/subtitles.json
 public/subtitles.srt
 public/props.json
 public/scene_visuals/
+# 场景素材全局缓存（建议18，跨任务按 query hash 复用）
+public/scene_visuals/_cache/
 public/bgm.*
 public/sfx/
 api/jobs/
 api/uploads/
+api/templates.json
 
 # Host video templates (large binary assets, keep photo sources in git)
 assets/host/*.mp4

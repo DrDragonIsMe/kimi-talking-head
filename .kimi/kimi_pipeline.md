@@ -53,6 +53,10 @@ bash scripts/pipeline.sh path/to/article.md my_video
 - `output/my_video.mp4`
 - `output/my_video_cover.png`
 
+多主播：pipeline 第 3 个位置参数或 `HOST_PROFILE` 环境变量（绝对路径，Web 后台多主播切换即走此方式）可指定主播 profile，默认 `config/host_profile.json`；额外 profile 放在 `config/hosts/` 下。
+
+画面比例：`video_layout.aspect` 决定渲染 composition 与分辨率——`9:16`→`TalkingHeadVideo`（1080×1920，默认）、`16:9`→`TalkingHeadVideoLandscape`（1920×1080）、`1:1`→`TalkingHeadVideoSquare`（1080×1080）。
+
 只改标题/风格，复用已有音频和唇形视频：
 
 ```bash
@@ -82,6 +86,15 @@ bash scripts/render_with_reused_media.sh \
 | `render` | `output/<run>.mp4` + 封面 | `FORCE_RENDER=1` |
 
 失败重跑会自动从失败阶段继续。
+
+Pre-flight 校验（每次运行前自动执行）：
+
+- `scripts/lib/validate_config.sh`：校验 `content_overlay.subtitles.dna` 合法性（`classic|loud|keynote|cream|editorial|documentary`），无效直接报错退出，不再静默回退 classic。
+- `scripts/validate_article.js`（`script` 阶段前）：文章质量预检（字符数 100~10000、代码块 <30%、表格 <10 行、中文 ≥50%），默认仅警告；`STRICT_ARTICLE_CHECK=1` 时不通过即终止。
+
+`render` 阶段附加行为：
+
+- `video_layout.preview.enabled=true` 时先以 `--scale=0.33` 渲染低清 `temp/<run>/preview.mp4`（跳过 BGM/音效，失败不阻塞正式渲染）；Web 后台检测到后经 SSE 推 `preview_ready`，可提前在线预览。
 
 ## 5. GPU 服务器部署
 
