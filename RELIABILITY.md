@@ -46,7 +46,17 @@ Before any run, the pipeline validates:
 - **All unreachable** → clear log line and fallback to the `primary` fields (same as the no-workers path).
 - Per-service paths (`tts_path`, `infinitetalk_path`, …) are read from the selected worker entry; a worker missing a service's path is treated as unavailable for that service (currently wired into `tts_index.sh`; other scripts keep the legacy primary/backup logic).
 
-## 5. Reuse Without Regeneration
+## 5. Customer Series (`config/hosts/customer_female.json`)
+
+The 「客户说」 series uses a randomized AI host pool instead of a single real person:
+
+- **Identity**: `scripts/generate_customer_persona.js` randomly picks a surname, given name, title, industry, and company name, then masks the middle characters with `*` (e.g. `李*涵`, `星*科技`). The resulting label is written to `video_layout.hybrid.brandBadge.text`.
+- **Visuals**: `scripts/generate_customer_avatars.sh` generates 12 short 640×640 young-female talking-head template videos via `bl video generate`, scales them to 640×640, removes audio, and extracts the first frame as a photo fallback. The pipeline randomly picks one video and one photo per run.
+- **Voice**: `scripts/generate_customer_voices.sh` produces 6 pitch-shifted variants of `assets/voice/female_ref_jennifer.wav` using ffmpeg (`asetrate+atempo+aresample`). The pipeline randomly picks one reference per run for IndexTTS cloning.
+- **One-shot setup**: `npm run setup:customer` (or `bash scripts/setup_customer_assets.sh`) generates both pools. Output directories (`assets/host/customers/`, `assets/voice/customers/`) are gitignored, so a fresh clone must run this once before rendering a customer video.
+- **Runtime**: `scripts/pipeline.sh` creates `temp/<run>/profile_effective.json` from the original profile plus the random persona, then uses that effective profile for TTS, lip-sync, and render. The original profile is never mutated.
+
+## 6. Reuse Without Regeneration
 
 For style or title changes only:
 
@@ -62,13 +72,13 @@ The web admin (`npm run web`) goes further: its **Rebuild** button is slimmer �
 
 Workdir cloning (`prepareReuseWorkdir`) uses Node's `fs.cpSync` (Node ≥ 16.7) instead of the old `cp -cR` / `cp -R` fallback chain, so reuse behaves identically on macOS and Linux.
 
-## 6. Monitoring
+## 7. Monitoring
 
 - Check remote job logs in `temp/<run>/remote_job_*`.
 - Check GPU status with `nvidia-smi` on the server.
 - `scripts/check_server.sh` verifies SSH + service paths.
 
-## 7. Failure Runbooks
+## 8. Failure Runbooks
 
 | Symptom | Action |
 |---|---|
@@ -77,9 +87,10 @@ Workdir cloning (`prepareReuseWorkdir`) uses Node's `fs.cpSync` (Node ≥ 16.7) 
 | MuseTalk install fails | Check system/data disk space (≥25 GB); verify `mmcv==2.0.1`, `mmdet==3.1.0`, `mmpose==1.1.0` install against the chosen PyTorch/CUDA version. |
 | MuseTalk face detection fails | Use a clear frontal-face template video for `host.video_source`; verify detection/landmark weights in `models/mmdet/` and `models/mmpose/`. |
 | Subtitle match < 65% | Verify script matches audio; re-run Whisper or regenerate script. |
+| `heroMoments[i] ... 超出正文时长范围` | Whisper word timestamps can run slightly past the audio end. `scripts/locate_hero_moments.js` now clamps moments to `maxDurationSeconds` (passed from `AUDIO_DURATION`); re-run with `FORCE_RENDER=1` to pick up the fix. |
 | Render OOM / fails | Reduce `REMOTION_PARALLEL` and ensure output directory has space. |
 
-## 8. Testing
+## 9. Testing
 
 `npm test` runs 19 offline suites plus `tsc --noEmit`, covering all critical paths. `npm run test:fast` runs the same suites except the API integration test and the TypeScript check (18 suites) for a quicker loop.
 
@@ -108,7 +119,7 @@ Workdir cloning (`prepareReuseWorkdir`) uses Node's `fs.cpSync` (Node ≥ 16.7) 
 
 Visual regression (`npm run test:visual`) uses SSIM pixel comparison for three representative frames.
 
-## 9. Web Admin Resilience
+## 10. Web Admin Resilience
 
 - **Webhook delivery persistence**: each version record carries `webhookDelivery {status, attempts, lastAttemptAt, lastError}`. Every attempt is persisted, so a process restart no longer loses pending deliveries — at startup the server scans version records for `status === 'pending'` on terminal versions and resumes them; `delivered` records are skipped, preventing duplicates after restart.
 - **Job list caching**: `api/job-store.js` caches `listJobs`/`getJob` results in memory, invalidated by `state.json` mtime, so the list endpoint no longer re-reads every job file per request.
@@ -116,7 +127,7 @@ Visual regression (`npm run test:visual`) uses SSIM pixel comparison for three r
 - **SSE keepalive**: comment frames every 25 s by default, overridable via `SSE_KEEPALIVE_MS` (tests use a short interval to assert keepalive frames).
 - **Scheduled jobs**: cron schedules (`node-cron`) are restored from persisted job state at startup; a tick is skipped while the job is active. External triggers (`POST /api/v1/trigger/<token>`) are registered before the auth middleware — the token itself is the credential.
 
-## 10. Deployment Checklist
+## 11. Deployment Checklist
 
 For a brand-new GPU server:
 
@@ -125,4 +136,5 @@ For a brand-new GPU server:
 3. Follow `server/MODEL_CHECKLIST.md` to place weights and create symlinks.
 4. Run `bash scripts/detect_paths.sh` on the local Mac.
 5. Run `bash scripts/check_server.sh`.
-6. Run a short end-to-end test video.
+6. For customer-series videos, run `npm run setup:customer` once to generate the AI host/voice pools.
+7. Run a short end-to-end test video.

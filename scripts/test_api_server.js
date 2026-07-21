@@ -1229,8 +1229,21 @@ async function main() {
       assert(assets.bgm.length >= 1, 'bgm lists real files from assets/bgm/');
       const bgm0 = assets.bgm[0];
       assert(bgm0.name && bgm0.size > 0 && bgm0.url.startsWith('/assets/bgm/'), 'bgm entry has name/size/url');
-      assertEqual(assets.hosts.length, 1, 'no config/hosts dir -> single default host entry');
-      assertEqual(assets.hosts[0].path, 'config/host_profile.json', 'default host profile path');
+      // hosts 断言需按真实环境计算预期：本地可能已有 config/hosts/*.json（如 customer_female.json），
+      // 只有目录不存在或无 .json 时才回退单个默认主播。
+      const hostsDirOnDisk = path.join(PROJECT_ROOT, 'config', 'hosts');
+      const hasHostProfiles =
+        fs.existsSync(hostsDirOnDisk) && fs.readdirSync(hostsDirOnDisk).some((f) => f.endsWith('.json'));
+      if (!hasHostProfiles) {
+        assertEqual(assets.hosts.length, 1, 'no config/hosts dir -> single default host entry');
+        assertEqual(assets.hosts[0].path, 'config/host_profile.json', 'default host profile path');
+      } else {
+        assert(assets.hosts.length >= 1, 'config/hosts/*.json -> hosts listed');
+        assert(
+          assets.hosts.every((h) => /^config\/hosts\/[a-zA-Z0-9_\-]+\.json$/.test(h.path) && h.name),
+          'host entries carry config/hosts/<file>.json path and name'
+        );
+      }
 
       const bgmRes = await fetch(`${FAST}${bgm0.url}`);
       assertEqual(bgmRes.status, 200, 'bgm file fetch 200');

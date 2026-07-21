@@ -6,7 +6,8 @@
 # Local configuration with secrets / server addresses
 config/host_profile.json
 config/servers.json
-config/hosts/
+config/hosts/*
+!config/hosts/customer_female.json
 
 # Dependencies
 node_modules/
@@ -36,6 +37,9 @@ api/templates.json
 # Host video templates (large binary assets, keep photo sources in git)
 assets/host/*.mp4
 assets/host/*.mov
+assets/host/customers/
+assets/host/customer_female*.png
+assets/voice/customers/
 
 # Python cache
 __pycache__/

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: 薪灵视频后台 API（kimi-talking-head web admin）
-  version: 2.3.0
+  version: 2.4.0
   description: |
     文章转口播视频的任务管理后台。版本化运行：每次 run/rebuild 生成新版本（v1=outputName，vN=<outputName>_vN），
     旧版本产物保留。默认本机无鉴权；设置 WEB_TOKENS="alice:tokenA,bob:tokenB" 后，
@@ -12,7 +12,7 @@ info:
     webhookDelivery（重启恢复）；详情返回 costEstimate 成本预估。
   contact: {}
 servers:
-  - url: http://localhost:3456
+  - url: http://localhost:3457
 tags:
   - name: jobs
   - name: templates

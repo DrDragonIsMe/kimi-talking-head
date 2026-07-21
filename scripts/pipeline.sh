@@ -56,6 +56,42 @@ mkdir -p "$TEMP_ROOT" "$WORK_DIR" "$OUTPUT_DIR"
 init_state "$WORK_DIR"
 print_state "$WORK_DIR"
 
+# 客户说：随机生成脱敏身份与人物形象，生成临时 effective profile。
+# 后续阶段统一读取该 profile，避免原配置被污染，同时支持每次运行的人物差异化。
+PROFILE_EFFECTIVE="$WORK_DIR/profile_effective.json"
+if node "$PROJECT_DIR/scripts/generate_customer_persona.js" "$PROFILE" > "$WORK_DIR/customer_persona.json" 2>/dev/null; then
+    PERSONA_LABEL=$(jq -r '.label // ""' "$WORK_DIR/customer_persona.json")
+    PERSONA_PHOTO=$(jq -r '.photoSource // ""' "$WORK_DIR/customer_persona.json")
+    PERSONA_VIDEO=$(jq -r '.videoSource // ""' "$WORK_DIR/customer_persona.json")
+    PERSONA_VOICE=$(jq -r '.voiceSource // ""' "$WORK_DIR/customer_persona.json")
+    PERSONA_HOST_NAME=$(jq -r '.hostName // ""' "$WORK_DIR/customer_persona.json")
+    if [ -n "$PERSONA_LABEL" ] || [ -n "$PERSONA_PHOTO" ] || [ -n "$PERSONA_VIDEO" ] || [ -n "$PERSONA_VOICE" ]; then
+        cp "$PROFILE" "$PROFILE_EFFECTIVE"
+        if [ -n "$PERSONA_LABEL" ]; then
+            jq --arg label "$PERSONA_LABEL" '.video_layout.hybrid.brandBadge.text = $label' "$PROFILE_EFFECTIVE" > "$PROFILE_EFFECTIVE.tmp" && mv "$PROFILE_EFFECTIVE.tmp" "$PROFILE_EFFECTIVE"
+        fi
+        if [ -n "$PERSONA_PHOTO" ]; then
+            jq --arg photo "$PERSONA_PHOTO" '.host.photo_source = $photo' "$PROFILE_EFFECTIVE" > "$PROFILE_EFFECTIVE.tmp" && mv "$PROFILE_EFFECTIVE.tmp" "$PROFILE_EFFECTIVE"
+        fi
+        if [ -n "$PERSONA_VIDEO" ]; then
+            jq --arg video "$PERSONA_VIDEO" '.host.video_source = $video' "$PROFILE_EFFECTIVE" > "$PROFILE_EFFECTIVE.tmp" && mv "$PROFILE_EFFECTIVE.tmp" "$PROFILE_EFFECTIVE"
+        fi
+        if [ -n "$PERSONA_VOICE" ]; then
+            jq --arg voice "$PERSONA_VOICE" '.voice.reference_audio = $voice' "$PROFILE_EFFECTIVE" > "$PROFILE_EFFECTIVE.tmp" && mv "$PROFILE_EFFECTIVE.tmp" "$PROFILE_EFFECTIVE"
+        fi
+        if [ -n "$PERSONA_HOST_NAME" ]; then
+            jq --arg name "$PERSONA_HOST_NAME" '.host.name = $name' "$PROFILE_EFFECTIVE" > "$PROFILE_EFFECTIVE.tmp" && mv "$PROFILE_EFFECTIVE.tmp" "$PROFILE_EFFECTIVE"
+        fi
+        PROFILE="$PROFILE_EFFECTIVE"
+        export PROFILE
+        echo "👤 客户身份: ${PERSONA_LABEL:-默认}"
+        echo "🖼️  客户形象: ${PERSONA_PHOTO:-默认}"
+        echo "🎬 形象视频: ${PERSONA_VIDEO:-默认}"
+        echo "🎙️  声音样本: ${PERSONA_VOICE:-默认}"
+        echo ""
+    fi
+fi
+
 monitor_init "$WORK_DIR/monitor" "$PIPELINE_RUN_ID" "$WORK_DIR"
 
 CURRENT_PHASE="bootstrap"
@@ -64,9 +100,19 @@ pipeline_finish() {
     local exit_code=$?
 
     if [ "$exit_code" -ne 0 ]; then
-        if [ -n "${CURRENT_PHASE:-}" ]; then
+        # CURRENT_PHASE 可能是 bootstrap/parallel_media/render_prepare 等监控标签，
+        # 并非 PHASES 里的真实阶段；只对真实阶段写 failed，避免污染 .pipeline_state.json。
+        if [ -n "${CURRENT_PHASE:-}" ] && printf '%s\n' "${PHASES[@]}" | grep -qx "$CURRENT_PHASE"; then
             mark_failed "$WORK_DIR" "$CURRENT_PHASE" "exit code $exit_code"
         fi
+        # 进程中断时仍挂在 running 的真实阶段（如并行子任务里的 lipsync）一并标记
+        # failed，否则 resume 时状态文件里永远是 running，无法判断真实进度。
+        local p
+        for p in "${PHASES[@]}"; do
+            if [ "$(get_phase "$WORK_DIR" "$p" status)" = "running" ]; then
+                mark_failed "$WORK_DIR" "$p" "pipeline interrupted (exit code $exit_code)"
+            fi
+        done
         monitor_phase "$CURRENT_PHASE" "failed" "流水线执行失败" "$(jq -cn --arg output "$OUTPUT_NAME" '{outputName: $output}')"
     else
         monitor_phase "pipeline" "completed" "整条流水线执行完成" "$(jq -cn --arg output "$OUTPUT_NAME" --arg workDir "$WORK_DIR" '{outputName: $output, workDir: $workDir}')"
@@ -321,16 +367,22 @@ VISUALS_PUBLIC_DIR="$PROJECT_DIR/public/scene_visuals/$OUTPUT_NAME"
     else
         if ([ -s "$WORK_DIR/subtitles_raw.json" ] || has_valid_srt "$WORK_DIR/subtitles_raw.srt") && [ "${FORCE_WHISPER:-0}" != "1" ]; then
             echo "♻️  复用 Whisper 原始字幕，重新对齐原文"
+            # whisper 阶段在 state 中独立存在（init_state 的 PHASES 含 whisper），
+            # 复用原始转写时也要把该阶段标记为完成，避免状态文件里永远 pending。
+            mark_completed "$WORK_DIR" whisper "$WORK_DIR/subtitles_raw.srt"
         else
+            mark_running "$WORK_DIR" whisper
             bash "$PROJECT_DIR/scripts/whisper_local.sh" "$WORK_DIR/audio.wav" "$WORK_DIR" "$WHISPER_MODEL"
             if [ ! -f "$WORK_DIR/audio.srt" ]; then
                 echo "❌ Whisper 未生成 audio.srt" >&2
+                mark_failed "$WORK_DIR" whisper "whisper_local.sh 未生成 audio.srt"
                 exit 1
             fi
             mv -f "$WORK_DIR/audio.srt" "$WORK_DIR/subtitles_raw.srt"
             if [ -f "$WORK_DIR/audio.json" ]; then
                 mv -f "$WORK_DIR/audio.json" "$WORK_DIR/subtitles_raw.json"
             fi
+            mark_completed "$WORK_DIR" whisper "$WORK_DIR/subtitles_raw.srt"
         fi
         echo "📝 用原文校准字幕..."
         if [ -s "$WORK_DIR/subtitles_raw.json" ]; then
@@ -663,9 +715,12 @@ CHAPTERS_JSON=$(cat "$CHAPTERS_JSON_PATH" 2>/dev/null || echo '[]')
 HERO_MOMENTS_JSON='[]'
 HERO_STORYBOARD_JSON="${STORYBOARD_JSON:-$WORK_DIR/storyboard.json}"
 if [ -s "$WORK_DIR/subtitles_words.json" ] && [ -s "$HERO_STORYBOARD_JSON" ]; then
+    # 把音频时长作为上限传给 hero 定位，避免词级时间戳末尾越过正文时长导致 props 预检失败
+    HERO_MAX_DURATION_ARG=""
+    [ -n "${AUDIO_DURATION:-}" ] && HERO_MAX_DURATION_ARG="$AUDIO_DURATION"
     if node "$PROJECT_DIR/scripts/locate_hero_moments.js" \
         "$HERO_STORYBOARD_JSON" "$WORK_DIR/subtitles_words.json" \
-        "$WORK_DIR/hero_moments.json" "0"; then
+        "$WORK_DIR/hero_moments.json" "0" "$HERO_MAX_DURATION_ARG"; then
         HERO_MOMENTS_JSON=$(cat "$WORK_DIR/hero_moments.json" 2>/dev/null || echo '[]')
     else
         echo "⚠️  hero 时刻定位失败，按无 hero 继续"

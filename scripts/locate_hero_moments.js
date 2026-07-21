@@ -88,8 +88,16 @@ const applyDensityRules = (moments) => {
   return kept;
 };
 
+const clampMoment = (moment, maxDuration) => {
+  if (typeof maxDuration !== 'number' || !Number.isFinite(maxDuration)) return moment;
+  const start = Math.min(moment.start, maxDuration);
+  const end = Math.min(Math.max(moment.end, start), maxDuration);
+  return { ...moment, start, end };
+};
+
 const locateMoments = (storyboard, wordCues, options = {}) => {
   const offset = options.offsetSeconds || 0;
+  const maxDuration = options.maxDurationSeconds;
   const words = flattenWords(wordCues);
   if (words.length === 0) return { moments: [], dropped: 0 };
 
@@ -101,11 +109,20 @@ const locateMoments = (storyboard, wordCues, options = {}) => {
     if (!shot || !shot.hero_phrase) continue;
     const found = findPhraseInWindow(words, index, shot.hero_phrase, shot);
     if (found) {
-      located.push({
-        start: Number((found.start + offset).toFixed(3)),
-        end: Number((found.end + offset).toFixed(3)),
-        text: found.text,
-      });
+      const moment = clampMoment(
+        {
+          start: Number((found.start + offset).toFixed(3)),
+          end: Number((found.end + offset).toFixed(3)),
+          text: found.text,
+        },
+        maxDuration
+      );
+      // 完全超出时长范围则丢弃
+      if (moment.start < (maxDuration ?? Infinity)) {
+        located.push(moment);
+      } else {
+        dropped += 1;
+      }
     } else {
       dropped += 1;
     }
@@ -115,18 +132,19 @@ const locateMoments = (storyboard, wordCues, options = {}) => {
 };
 
 const main = () => {
-  const [, , storyboardPath, wordsPath, outputPath, offsetArg] = process.argv;
+  const [, , storyboardPath, wordsPath, outputPath, offsetArg, maxDurationArg] = process.argv;
   if (!storyboardPath || !wordsPath || !outputPath) {
-    console.error('Usage: node locate_hero_moments.js <storyboard.json> <words.json> <output.json> [offset-seconds]');
+    console.error('Usage: node locate_hero_moments.js <storyboard.json> <words.json> <output.json> [offset-seconds] [max-duration-seconds]');
     process.exit(1);
   }
 
   const storyboard = JSON.parse(fs.readFileSync(storyboardPath, 'utf8'));
   const wordCues = JSON.parse(fs.readFileSync(wordsPath, 'utf8'));
   const offsetSeconds = parseFloat(offsetArg || '0');
+  const maxDurationSeconds = maxDurationArg ? parseFloat(maxDurationArg) : undefined;
 
   const requested = (Array.isArray(storyboard) ? storyboard : []).filter((s) => s && s.hero_phrase).length;
-  const { moments, dropped } = locateMoments(storyboard, wordCues, { offsetSeconds });
+  const { moments, dropped } = locateMoments(storyboard, wordCues, { offsetSeconds, maxDurationSeconds });
 
   fs.writeFileSync(outputPath, JSON.stringify(moments, null, 2));
   console.log(

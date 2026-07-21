@@ -4,9 +4,9 @@ services:
     image: kimi-talking-head-api:latest
     container_name: kimi-talking-head-api
     ports:
-      - "3456:3456"
+      - "3457:3457"
     environment:
-      - PORT=3456
+      - PORT=3457
       - MAX_CONCURRENT=1
     env_file:
       - .env

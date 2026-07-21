@@ -159,17 +159,18 @@ FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video
 | 完整生成新视频 | `bash scripts/pipeline.sh path/to/article.md my_video` |
 | 复用音频/唇视频重新渲染 | `bash scripts/render_with_reused_media.sh article.md my_video_v2 temp/my_video/audio.wav temp/my_video/lip_synced_raw.mp4` |
 | 探测服务器路径 | `bash scripts/detect_paths.sh` |
+| 生成客户说素材池 | `npm run setup:customer`（或 `bash scripts/setup_customer_assets.sh`） |
 | 强制重跑字幕阶段 | `FORCE_SUBTITLES=1 bash scripts/pipeline.sh article.md my_video` |
 | 预览 Remotion 组件 | `npm run dev` |
 | TypeScript 检查 | `npm run build` |
 | 全量测试 / 快速回归 | `npm test` / `npm run test:fast` |
-| 启动 Web 管理后台 | `npm run web`（http://localhost:3456） |
+| 启动 Web 管理后台 | `npm run web`（http://localhost:3457） |
 
 ---
 
 ## Web 管理后台
 
-`npm run web`（等价 `npm run api`）启动管理后台，浏览器打开 http://localhost:3456：
+`npm run web`（等价 `npm run api`）启动管理后台，浏览器打开 http://localhost:3457：
 
 - **任务列表**：状态徽章（draft/queued/running/completed/failed/cancelled）、9 阶段进度条、行内停止/删除；支持按任务名搜索；SSE 实时推送刷新（服务端 watcher 跟踪阶段与日志指纹，运行中进度也实时；断线自动回退 3s 轮询）。
 - **新建任务**：粘贴文章或上传 `.md/.txt`，创建草稿后进入详情页调参，确认无误再点 Run 执行（参数在每次执行时才合并生效）；高级配置自动预填上次项目的 overrides（可改）；支持批量模式（多篇文章用单独一行 `---` 分隔，自动编号命名）与配置模板套用；可选主播（下拉数据源为 `config/hosts/` 下的 profile，对应 `hostProfile` 字段）与 cron 定时。创建时自动做文章质量预检，不通过返回 400（`ARTICLE_VALIDATE_MODE=warn` 时降级为警告）。
@@ -204,11 +205,77 @@ WEB_TOKENS="alice:tokenA,bob:tokenB" npm run web
 
 ### Webhook（P2-11）
 
-任务创建（含批量）或 PATCH 时可设置 `webhookUrl`（http(s)，≤2048 字符）。每当一个版本到达终态（completed/failed/cancelled），后台向其 POST JSON `{jobId, outputName, version, status, error, finishedAt}`，最多 3 次尝试（1s/3s 退避，5s 超时）；失败不阻塞任务，最终写入该任务的 stderr 日志。投递状态持久化在版本记录的 `webhookDelivery {status, attempts, lastAttemptAt, lastError}` 字段中：服务重启后会自动恢复未完成的 `pending` 投递，已 `delivered` 的版本不会重复投递。全部端点见根目录 `openapi.yaml`（OpenAPI 3.0，v2.3.0）。
+任务创建（含批量）或 PATCH 时可设置 `webhookUrl`（http(s)，≤2048 字符）。每当一个版本到达终态（completed/failed/cancelled），后台向其 POST JSON `{jobId, outputName, version, status, error, finishedAt}`，最多 3 次尝试（1s/3s 退避，5s 超时）；失败不阻塞任务，最终写入该任务的 stderr 日志。投递状态持久化在版本记录的 `webhookDelivery {status, attempts, lastAttemptAt, lastError}` 字段中：服务重启后会自动恢复未完成的 `pending` 投递，已 `delivered` 的版本不会重复投递。全部端点见根目录 `openapi.yaml`（OpenAPI 3.0，v2.4.0）。
 
 ### 多主播切换
 
 `config/hosts/` 下放置额外的主播 profile JSON（结构与 `config/host_profile.json` 相同）。新建任务时选择主播（API 字段 `hostProfile`，仅接受 `config/hosts/` 下已存在的纯 `.json` 文件名）；执行时后端以 `HOST_PROFILE` 绝对路径注入 pipeline。优先级：pipeline 第 3 个位置参数 > `HOST_PROFILE` 环境变量 > `config/host_profile.json`。
+
+#### 内置双系列：CEO说 / 客户说
+
+| 系列 | 配置 | 形象 | 音色 | 角标 |
+|------|------|------|------|------|
+| CEO说 | `config/host_profile.json`（默认） | `assets/host/me.jpg` + `me.mp4` | IndexTTS 克隆 `assets/voice/me.m4a` | 薪人薪事 CEO |
+| 客户说 | `config/hosts/customer_female.json` | AI 合成人物视频池（`assets/host/customers/*.mp4`） | IndexTTS 克隆女声参考池（`assets/voice/customers/*.wav`） | 客户说 · 星*科技 · 李*涵 |
+
+「客户说」每次运行都会**自动随机化**：
+
+- 客户身份：随机姓氏 + 名字 + 职位 + 行业 + 公司名，姓名和公司名做脱敏处理（首尾字符保留，中间用 `*` 代替，如 `李*涵`、`星*科技`），显示在视频角标上。
+- 人物形象：从 `assets/host/customers/` 随机挑选一段 640×640 的年轻女性口播模板视频。
+- 声音参考：从 `assets/voice/customers/` 随机挑选一段变调女声参考音频，供 IndexTTS 克隆。
+
+随机化逻辑在 `scripts/generate_customer_persona.js` 中实现；pipeline 启动时生成临时 `profile_effective.json`，只覆盖当前运行的形象/音色/角标，不污染原配置。
+
+**调用方法**
+
+1. **CLI**：「客户说」把 profile 作为第 3 个参数传给 pipeline；「CEO说」不传即可（默认配置）。
+
+   ```bash
+   # CEO说（默认）
+   bash scripts/pipeline.sh article.txt my_run
+
+   # 客户说（每次运行人物/声音/身份都会随机变化）
+   bash scripts/pipeline.sh article.txt my_run config/hosts/customer_female.json
+
+   # 等效写法：HOST_PROFILE 环境变量（绝对路径）
+   HOST_PROFILE=$PWD/config/hosts/customer_female.json bash scripts/pipeline.sh article.txt my_run
+   ```
+
+2. **Web 管理后台**（`npm run api`）：新建任务表单的「主播」下拉选择对应 profile（数据源为 `GET /api/v1/assets` 返回的 `hosts` 列表，即 `config/hosts/` 下的 `.json` 文件）；不选则为 CEO说。
+
+3. **API**：`POST /api/v1/jobs` 传 `hostProfile` 字段（仅接受 `config/hosts/` 下已存在的纯 `.json` 文件名，不是路径）：
+
+   ```bash
+   curl -X POST http://localhost:3457/api/v1/jobs \
+     -H 'Content-Type: application/json' \
+     -d '{"outputName":"my_run","articleText":"...","hostProfile":"customer_female.json","run":true}'
+   ```
+
+**注意事项**
+
+- 优先级：pipeline 第 3 个位置参数 > `HOST_PROFILE` 环境变量 > `config/host_profile.json`。
+- 两个系列的模板、字幕 DNA、布局、品牌色完全一致，只有形象、音色、角标不同；想改风格（如 DNA、布局）请改对应 profile 里的字段，互不影响。
+- 「客户说」的形象/音色均为 AI 合成，无真人肖像权问题，可商用；「CEO说」使用真人素材，注意授权范围。
+- `config/hosts/`、`assets/host/customers/`、`assets/voice/customers/`、`assets/host/*.mp4` 已入 `.gitignore`，不会误提交。
+- 新增其他主播：复制任一 profile 到 `config/hosts/<名字>.json`，替换 `host.photo_source` / `host.video_source` / `voice.reference_audio` 三处即可，无需改代码；`scripts/lib/validate_config.sh` 会在 pipeline 启动时校验配置合法性。
+
+**客户说素材生成**（新仓库或需要焕新形象/音色时执行一次）
+
+```bash
+# 一键生成人物视频池 + 女声参考音频池
+bash scripts/setup_customer_assets.sh
+
+# 或分步执行：
+bash scripts/generate_customer_avatars.sh   # 12 段 640×640 女性口播模板视频 + 首帧照片
+bash scripts/generate_customer_voices.sh  # 6 段变调女声参考音频
+```
+
+- `scripts/generate_customer_avatars.sh`：基于 `bl video generate`（`happyhorse-1.1-t2v`）批量生成年轻、漂亮、商务感女性 5s 口播视频，下载后统一缩放到 640×640、去掉音轨，并提取首帧作为照片 fallback。
+- `scripts/generate_customer_voices.sh`：基于 `assets/voice/female_ref_jennifer.wav` 用 ffmpeg `asetrate+atempo+aresample` 生成 5 种不同音调的克隆参考音频，加上原始音色共 6 段。
+- 生成产物在 `.gitignore` 中排除，不会污染仓库；换电脑时重新执行上述脚本即可获得同等效果。
+- 想调整人物风格，修改 `scripts/generate_customer_avatars.sh` 顶部的 `PROMPTS` 数组后重新运行；想调整音色范围，修改 `scripts/generate_customer_voices.sh` 中的 `PITCHES` 数组。
+
+替换素材后无需改配置的其他字段；建议先跑 `PROFILE=config/hosts/customer_female.json bash scripts/tts_index.sh <测试文本> /tmp/out.wav` 验证音色，再跑完整 pipeline。
 
 ### 成本预估
 

@@ -82,7 +82,7 @@ function requireOwner(job, req, res) {
   return true;
 }
 
-const PORT = process.env.PORT || 3456;
+const PORT = process.env.PORT || 3457; // 3456 在本机属于 ai-ppt，3000 属于 remotion，默认避开
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT || '1', 10);
 const UPLOAD_DIR = path.join(PROJECT_ROOT, 'api', 'uploads');
 const PUBLIC_DIR = path.join(__dirname, 'public');

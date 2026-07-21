@@ -550,7 +550,9 @@
         assets.hosts.forEach(function (h) {
           if (h.path === 'config/host_profile.json') return; // 默认主播，勿重复
           var opt = document.createElement('option');
-          opt.value = h.name;
+          // 后端 hostProfile 校验要求纯 .json 文件名（如 customer_female.json），
+          // 而 assets 返回的 name 不带扩展名，需从 path 取文件名。
+          opt.value = (h.path || '').split('/').pop() || h.name;
           opt.textContent = h.name;
           hostSelect.appendChild(opt);
         });

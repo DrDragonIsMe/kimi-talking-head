@@ -34,6 +34,35 @@ cp .env.example                     .env          # 填 API key
 - `template`：`editorial` 或 `product-launch`
 - `video_layout.hybrid.preset`：布局预设
 
+#### 客户说系列（随机 AI 合成人物）
+
+仓库内置 `config/hosts/customer_female.json`，每次运行会：
+
+1. 随机生成脱敏客户身份（如 `客户说 · 星*科技 · 李*涵`）。
+2. 从 `assets/host/customers/` 随机挑选 640×640 年轻女性口播模板视频。
+3. 从 `assets/voice/customers/` 随机挑选变调女声参考音频。
+
+首次使用或需要焕新时，一键生成素材池：
+
+```bash
+bash scripts/setup_customer_assets.sh
+```
+
+等价于依次执行：
+
+```bash
+bash scripts/generate_customer_avatars.sh   # bl video generate → 12 段 640×640 视频 + 首帧照片
+bash scripts/generate_customer_voices.sh  # 基于 female_ref_jennifer.wav → 6 段变调参考音频
+```
+
+运行示例：
+
+```bash
+bash scripts/pipeline.sh articles/ai_customer_xinling.md ai_customer_xinling config/hosts/customer_female.json
+```
+
+产物目录已入 `.gitignore`，换环境后重新执行 `setup_customer_assets.sh` 即可复现同等效果。
+
 在 `config/servers.json` 中配置主服务器 `host` / `port` / `user`，然后探测路径：
 
 ```bash
@@ -53,7 +82,7 @@ bash scripts/pipeline.sh path/to/article.md my_video
 - `output/my_video.mp4`
 - `output/my_video_cover.png`
 
-多主播：pipeline 第 3 个位置参数或 `HOST_PROFILE` 环境变量（绝对路径，Web 后台多主播切换即走此方式）可指定主播 profile，默认 `config/host_profile.json`；额外 profile 放在 `config/hosts/` 下。
+多主播：pipeline 第 3 个位置参数或 `HOST_PROFILE` 环境变量（绝对路径，Web 后台多主播切换即走此方式）可指定主播 profile，默认 `config/host_profile.json`；额外 profile 放在 `config/hosts/` 下。`config/hosts/customer_female.json` 对应「客户说」系列，支持每次运行随机 AI 合成人物与声音（见上方「客户说系列」）。
 
 画面比例：`video_layout.aspect` 决定渲染 composition 与分辨率——`9:16`→`TalkingHeadVideo`（1080×1920，默认）、`16:9`→`TalkingHeadVideoLandscape`（1920×1080）、`1:1`→`TalkingHeadVideoSquare`（1080×1080）。
 

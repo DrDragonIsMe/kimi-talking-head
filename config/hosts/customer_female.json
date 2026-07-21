@@ -1,0 +1,273 @@
+{
+  "host": {
+    "name": "客户说·林总",
+    "photo_source": "assets/host/customers/customer_01.png",
+    "position": "center",
+    "display_size": {
+      "width": 720,
+      "height": 960
+    },
+    "border_radius": 24,
+    "video_source": "assets/host/customers/customer_01.mp4"
+  },
+  "voice": {
+    "engine": "indextts",
+    "reference_audio": "assets/voice/female_ref_jennifer.wav",
+    "speed": 1,
+    "pitch": 0,
+    "emotion": "neutral",
+    "format": "wav"
+  },
+  "infinitetalk": {
+    "enable": true,
+    "size": "infinitetalk-480-fast",
+    "sample_steps": 8,
+    "motion_frame": 4,
+    "mode": "streaming",
+    "text_guide_scale": 1,
+    "audio_guide_scale": 2,
+    "num_persistent_param_in_dit": 0,
+    "quant": "fp8",
+    "quant_dir": "weights/InfiniteTalk/quant_models/infinitetalk_single_fp8.safetensors",
+    "use_teacache": true,
+    "teacache_thresh": 0.25,
+    "max_frame_num": 5000,
+    "lora_dir": "weights/FusionX_LoRA/Wan2.1_I2V_14B_FusionX_LoRA.safetensors",
+    "lora_scale": 1,
+    "sample_shift": 2,
+    "use_apg": false,
+    "low_vram": true,
+    "blocks_to_swap": 10,
+    "use_non_blocking": true,
+    "quantization": "fp8_e5m2",
+    "base_precision": "fp16_fast",
+    "attention_mode": "sdpa",
+    "segment_duration": 40,
+    "segment_overlap": 0,
+    "crossfade_duration": 0,
+    "max_retries": 3,
+    "keep_segments": true,
+    "poll_timeout": 7200
+  },
+  "product": {
+    "brand": "薪灵AI",
+    "tagline": "薪人薪事的AI引擎",
+    "slogan": "把人力数据，变成组织决策",
+    "cta": "看薪灵如何重构你的人力系统",
+    "pills": [
+      "预测离职",
+      "智能定薪",
+      "组织诊断",
+      "人才画像",
+      "合规风控"
+    ],
+    "primary_color": "#00b498",
+    "secondary_color": "#00d4c8",
+    "accent_color": "#00b498",
+    "bg_gradient": [
+      "#0a0a1a",
+      "#0a1a16"
+    ]
+  },
+  "customer_persona": {
+    "enabled": true,
+    "format": "客户说 · {{company}} · {{maskedName}}",
+    "photoDir": "assets/host/customers",
+    "videoDir": "assets/host/customers",
+    "voiceDir": "assets/voice/customers",
+    "surnames": ["林", "陈", "王", "张", "李", "刘", "杨", "赵", "周", "吴", "黄", "徐", "孙", "马", "朱"],
+    "givenNames": ["小雨", "嘉伟", "思琪", "博文", "婷婷", "浩然", "丽娜", "子涵", "俊杰", "雅婷", "慧敏", "志强", "雪梅", "建国", "秀兰", "伟强", "红梅", "建军", "淑芬", "国华"],
+    "titles": ["HR总监", "HRD", "人力资源总监", "人事总监", "HR经理", "薪酬绩效总监", "招聘总监", "HRVP", "CHO", "HR负责人"],
+    "industries": ["零售科技", "连锁餐饮", "智能制造", "生物医药", "互联网电商", "新能源", "金融科技", "教育培训", "物流供应链", "企业服务"],
+    "companyPrefixes": ["星", "云", "锐", "智", "创", "恒", "信", "达", "蓝", "启"],
+    "companySuffixes": ["科技", "集团", "信息", "智能", "网络", "数字", "控股", "人力", "云服"]
+  },
+  "title_card": {
+    "title": "客户说｜300人零售企业HR总监：薪灵AI把我从Excel里救了出来",
+    "subtitle": "",
+    "duration_seconds": 2
+  },
+  "style": {
+    "theme": "dark",
+    "subtitle_font": "Noto Sans SC",
+    "subtitle_size": 44,
+    "subtitle_weight": 700,
+    "subtitle_position": "bottom",
+    "highlight_style": "neon",
+    "highlight_color": "#00b498",
+    "inactive_color": "rgba(255,255,255,0.35)",
+    "bgm_volume": 0.12,
+    "endcard_duration_seconds": 6
+  },
+  "content_overlay": {
+    "subtitles": {
+      "maxLines": 3,
+      "maxCharsPerLine": 24,
+      "fontSizeLarge": 56,
+      "fontSizeMedium": 48,
+      "fontSizeSmall": 40,
+      "headlineLabel": "客户说",
+      "dna": "loud",
+      "segmentation": {
+        "maxSegmentSeconds": 3.2,
+        "minSegmentSeconds": 0.9,
+        "maxVisualLength": 26
+      }
+    },
+    "talkingPoints": {
+      "enabled": true,
+      "maxItems": 2,
+      "mainLabel": "观点拆解",
+      "secondaryLabel": "SUPPORTING POINT"
+    },
+    "dataBars": {
+      "enabled": true,
+      "maxItems": 5,
+      "label": "数据条",
+      "fallbackItems": []
+    },
+    "quoteHighlight": {
+      "enabled": true,
+      "label": "引用高亮",
+      "fallbackQuote": "",
+      "fallbackAuthor": ""
+    },
+    "layout": {
+      "sequence": [
+        "editorial-left",
+        "editorial-right",
+        "editorial-balanced"
+      ],
+      "holdCues": 3
+    }
+  },
+  "scene_visuals": {
+    "providers": [
+      "pexels",
+      "unsplash",
+      "wanx",
+      "placeholder"
+    ],
+    "pexels": {
+      "api_key": "KwmB33a8VoCabEBfKqsVuSmL6pbhL0R6a8GBynEt8Y0N0CVedur2mcGX",
+      "orientation": "portrait"
+    },
+    "unsplash": {
+      "access_key": "",
+      "orientation": "portrait"
+    },
+    "wanx": {
+      "model": "doubao-seedream-3-0",
+      "size": "1024x1024"
+    },
+    "llm": {
+      "enabled": true,
+      "provider": "kimi",
+      "max_tokens": 1200,
+      "concurrency": 3,
+      "max_retries": 2,
+      "cache": true,
+      "timeout_ms": 120000,
+      "prompt_template": ""
+    },
+    "storyboard": {
+      "enabled": true,
+      "max_shot_duration": 12,
+      "min_shot_duration": 3,
+      "shot_types": [
+        "wide shot",
+        "medium shot",
+        "close-up",
+        "extreme close-up",
+        "over-the-shoulder",
+        "insert"
+      ],
+      "camera_movements": [
+        "static",
+        "slow push-in",
+        "slow pull-out",
+        "gentle pan",
+        "tracking",
+        "handheld"
+      ],
+      "transitions": [
+        "cut",
+        "fade",
+        "dissolve"
+      ],
+      "styles": [
+        "editorial portrait",
+        "business documentary",
+        "cinematic",
+        "data visualization",
+        "abstract"
+      ],
+      "llm": {
+        "enabled": true,
+        "provider": "kimi",
+        "max_tokens": 12000,
+        "max_retries": 2,
+        "cache": true
+      }
+    }
+  },
+  "template": "editorial",
+  "video_layout": {
+    "mode": "portrait-hybrid",
+    "template": "editorial",
+    "talking_head": {
+      "hostPosition": "bottom-center",
+      "hostWindowWidth": 952,
+      "hostWindowHeight": 820,
+      "hostBorderRadius": 28,
+      "showSubtitles": false,
+      "showTalkingPoints": true,
+      "showDataBars": true,
+      "showQuoteHighlight": true
+    },
+    "hybrid": {
+      "preset": "balanced",
+      "mainVisualRatio": 0.58,
+      "mainVisualBorderRadius": 0,
+      "hostPosition": "bottom-center",
+      "hostWindowWidth": 560,
+      "hostWindowHeight": 640,
+      "hostBorderRadius": 28,
+      "showSubtitles": true,
+      "showTalkingPoints": false,
+      "showProgressBreadcrumb": true,
+      "showChapterCards": true,
+      "showDataBars": false,
+      "showQuoteHighlight": false,
+      "topicTag": {
+        "enabled": true,
+        "label": "薪灵AI",
+        "position": "top-left"
+      },
+      "brandBadge": {
+        "enabled": true,
+        "position": "bottom-right",
+        "text": "客户说 · 星*科技"
+      }
+    }
+  },
+  "output": {
+    "resolution": "1080x1920",
+    "fps": 30,
+    "bitrate": "8M",
+    "codec": "h264"
+  },
+  "lipsync": {
+    "engine": "musetalk"
+  },
+  "musetalk": {
+    "enable": true,
+    "version": "v15",
+    "bbox_shift": 0,
+    "fps": 25,
+    "batch_size": 1,
+    "max_retries": 3,
+    "remote_poll_interval": 30,
+    "remote_max_poll_minutes": 180
+  }
+}
