@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, OffthreadVideo, staticFile, useCurrentFrame, interpolate, Easing } from 'remotion';
 import type { ThemeConfig, VideoTemplate } from '../themes';
 import type { SceneVisual } from '../index';
+import { SceneMedia } from './SceneMedia';
 
 interface TitleCardProps {
   title: string;
@@ -625,9 +626,8 @@ const ProductLaunchTitleCard: React.FC<{
         }}
       >
         {heroVisual ? (
-          <img
-            src={staticFile(heroVisual.path)}
-            alt=""
+          <SceneMedia
+            visual={heroVisual}
             style={{
               width: '100%',
               height: '100%',

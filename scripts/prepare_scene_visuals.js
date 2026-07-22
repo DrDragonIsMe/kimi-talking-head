@@ -10,6 +10,8 @@ const crypto = require('crypto');
 // Optional LLM helper for content-aware keywords. Falls back to heuristic extraction.
 const kimiClient = require('./kimi_client');
 
+const isMain = require.main === module;
+
 const srtPath = process.argv[2];
 const outputJsonPath = process.argv[3];
 const outputDir = process.argv[4];
@@ -18,12 +20,14 @@ const projectDir = path.resolve(__dirname, '..');
 const configPath = process.argv[6] || path.join(projectDir, 'config', 'host_profile.json');
 const storyboardPath = process.argv[7] || '';
 
-if (!srtPath || !outputJsonPath || !outputDir) {
+if (isMain && (!srtPath || !outputJsonPath || !outputDir)) {
   console.error('Usage: node prepare_scene_visuals.js <subtitles.srt> <output.json> <output-dir> [video-title] [config-path] [storyboard-path]');
   process.exit(1);
 }
 
-const SCENE_DURATION = 42; // seconds per scene
+const SCENE_DURATION = 42; // 无分镜时的定长场景时长（fallback）
+const WINDOW_MIN_SECONDS = 6; // 分镜驱动的画面窗口目标最短时长
+const WINDOW_MAX_SECONDS = 15; // 分镜驱动的画面窗口目标最长时长
 const TARGET_WIDTH = 1080;
 const TARGET_HEIGHT = 1440;
 
@@ -190,8 +194,10 @@ async function asyncPool(tasks, concurrency) {
 }
 
 async function extractKeywordsWithLLM(text, title, shots = []) {
-  const shotSignature = shots.length ? `|${shots.map((s) => s.visual_prompt).join('|')}` : '';
-  const cacheInput = `${text.slice(0, 500)}${shotSignature}`.slice(0, 1200);
+  const shotSignature = shots.length
+    ? `|${shots.map((s) => `${s.subject || ''}:${s.setting || ''}:${s.visual_prompt || ''}`).join('|')}`
+    : '';
+  const cacheInput = `${text.slice(0, 1200)}${shotSignature}`.slice(0, 2400);
   const cacheKey = cacheInput.slice(0, 300);
   if (LLM_KEYWORD_CACHE.has(cacheKey)) {
     return LLM_KEYWORD_CACHE.get(cacheKey);
@@ -210,25 +216,26 @@ async function extractKeywordsWithLLM(text, title, shots = []) {
   }
 
   const defaultPrompt = `You are a visual editor for a Chinese business-news explainer video.
-Given the spoken Chinese text of one scene and the video title, produce a precise English image-search query and a richer AI-image prompt that directly reflect the scene's core visual idea.
+Given the spoken Chinese text of one short scene (usually 1-3 sentences) and the video title, produce a precise English stock-media search query and a richer AI-generation prompt that directly reflect THIS scene's specific content — not the video's general topic.
 
 Rules:
-1. The search query must be in English, 3-6 keywords, highly visual, and optimized for stock-photo sites (Pexels/Unsplash).
-2. Prefer concrete, visualizable concepts: scenes, actions, objects, moods, settings. Avoid abstract nouns.
-3. If the scene mentions data/charts, risk, AI, recruitment, or talent, include a matching visual keyword.
-4. Keep the Chinese summary under 20 characters.
-5. If storyboard shots are provided, synthesize their visual directions into one cohesive scene image prompt.
+1. The search query must be in English, 3-6 keywords, highly visual, and optimized for stock-photo/video sites (Pexels/Unsplash).
+2. Anchor the query to the exact sentence: concrete objects, actions, settings, metaphors. If the scene is metaphorical (e.g. "数据串在一起", "从Excel里救火"), pick a literal visual representation (e.g. connected dashboards, firefighting paperwork).
+3. Avoid generic filler like "business person office" or "professional meeting" unless the scene is literally about that.
+4. If the scene mentions data/charts, risk, AI, recruitment, payroll, or talent, include a matching visual keyword.
+5. Keep the Chinese summary under 20 characters.
+6. If storyboard shots are provided, synthesize their subject/setting/visual directions into one cohesive scene image prompt.
 
 Output strictly as JSON:
 {
   "search_query": "english keywords for stock photo search",
-  "visual_prompt": "detailed English prompt for AI image generation, 1-2 sentences, no text/logo/watermark",
+  "visual_prompt": "detailed English prompt for AI image/video generation, 1-2 sentences, no text/logo/watermark",
   "chinese_summary": "中文摘要"
 }
 
 Video title: ${title || 'business insight'}
-Scene text: """${text.slice(0, 500)}"""
-${shots.length ? `Storyboard shots for this scene:\n${shots.map((s) => `- ${s.shot_type}: ${s.visual_prompt}`).join('\n')}\nSynthesize these directions into a single cohesive visual.` : ''}`;
+Scene text: """${text.slice(0, 1000)}"""
+${shots.length ? `Storyboard shots for this scene:\n${shots.map((s) => `- ${s.shot_type || 'shot'} | ${s.subject || ''} | ${s.setting || ''} | ${s.visual_prompt || ''}`).join('\n')}\nSynthesize these directions into a single cohesive visual.` : ''}`;
 
   const prompt = cfg.prompt_template || defaultPrompt;
   const startMs = Date.now();
@@ -329,6 +336,89 @@ function loadStoryboard() {
 function getShotsForScene(shots, start, end) {
   if (!shots || shots.length === 0) return [];
   return shots.filter((s) => s.start >= start && s.start < end);
+}
+
+// 分镜驱动的画面窗口：把相邻短镜头合并成 6–15s 的视觉窗口，
+// 让每个画面紧贴对应的口播句子，而不是固定 42s 一图到底。
+// 无分镜时回退到定长 42s 切分（行为与旧版一致）。
+function buildVisualWindows(cues, shots, totalDuration, options = {}) {
+  const minSeconds = options.minSeconds || WINDOW_MIN_SECONDS;
+  const maxSeconds = options.maxSeconds || WINDOW_MAX_SECONDS;
+
+  if (Array.isArray(shots) && shots.length > 0) {
+    const sorted = shots
+      .filter((s) => typeof s.start === 'number' && typeof s.end === 'number' && s.end > s.start)
+      .slice()
+      .sort((a, b) => a.start - b.start);
+    const windows = [];
+    let current = null;
+    for (const shot of sorted) {
+      if (!current) {
+        current = { start: shot.start, end: shot.end, shots: [shot] };
+        continue;
+      }
+      const currentDur = current.end - current.start;
+      const candidateDur = shot.end - current.start;
+      const shotDur = shot.end - shot.start;
+      // 关窗条件：当前窗已达最短时长且并入后会超过最长时长；
+      // 或新镜头本身就超长（独立成窗，避免拖出一个超大窗口）。
+      if ((currentDur >= minSeconds && candidateDur > maxSeconds) || shotDur > maxSeconds) {
+        windows.push(current);
+        current = { start: shot.start, end: shot.end, shots: [shot] };
+      } else {
+        current.end = shot.end;
+        current.shots.push(shot);
+      }
+    }
+    if (current) windows.push(current);
+    if (windows.length > 0) {
+      // 覆盖整个正文时长，避免首尾出现无画面的空窗
+      windows[0].start = Math.min(windows[0].start, 0);
+      windows[windows.length - 1].end = Math.max(windows[windows.length - 1].end, totalDuration);
+    }
+    return windows;
+  }
+
+  const sceneCount = Math.max(1, Math.ceil(totalDuration / SCENE_DURATION));
+  const segmentDuration = totalDuration / sceneCount;
+  const windows = [];
+  for (let i = 0; i < sceneCount; i++) {
+    const start = i * segmentDuration;
+    const end = i === sceneCount - 1 ? totalDuration : (i + 1) * segmentDuration;
+    windows.push({ start, end, shots: getShotsForScene(shots, start, end) });
+  }
+  return windows;
+}
+
+// 轻量候选重排：按 query 词在候选描述中的命中数打分，top-N 里挑最贴切的。
+// 避免「pexels 首图即取」导致的泛化结果（如所有场景都是办公室人像）。
+const STOCK_STOP_WORDS = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'at', 'with', 'and', 'or', 'for', 'to', 'from', 'by', 'is', 'are', 'no', 'person', 'people', 'man', 'woman']);
+function scoreStockCandidate(query, candidateText) {
+  const words = String(query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 2 && !STOCK_STOP_WORDS.has(w));
+  const haystack = String(candidateText || '').toLowerCase();
+  let score = 0;
+  for (const w of new Set(words)) {
+    if (haystack.includes(w)) score += 1;
+  }
+  return score;
+}
+
+// 取打分最高的候选；分数并列时保持原顺序（API 相关性排序作为 tie-break）
+function pickBestCandidate(query, items, textOf) {
+  if (!items.length) return null;
+  let best = items[0];
+  let bestScore = -1;
+  for (const item of items) {
+    const score = scoreStockCandidate(query, textOf(item));
+    if (score > bestScore) {
+      best = item;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 function buildQueryFromShots(sceneShots) {
@@ -502,8 +592,10 @@ async function fetchWithUnsplashApi(query, _prompt, filePath, config) {
   if (!results.length) {
     throw new Error(`No Unsplash results for "${query}"`);
   }
-  // 按相关性取第一张
-  const pick = results[0];
+  // 候选重排：按 query 词与描述匹配度挑最贴切的一张，而不是盲取第一张
+  const pick = pickBestCandidate(query, results.slice(0, 10), (p) =>
+    `${p.alt_description || ''} ${p.description || ''} ${(p.tags || []).map((t) => t.title || t).join(' ')}`
+  );
   const downloadUrl = pick.urls?.raw || pick.urls?.full || pick.urls?.regular;
   if (!downloadUrl) {
     throw new Error('Unsplash result missing image URL');
@@ -556,7 +648,8 @@ async function fetchWithPexels(query, _prompt, filePath, config) {
   if (!photos.length) {
     throw new Error(`No Pexels results for "${query}"`);
   }
-  const pick = photos[0];
+  // 候选重排：按 query 词与 alt 文本匹配度挑最贴切的一张，而不是盲取第一张
+  const pick = pickBestCandidate(query, photos.slice(0, 10), (p) => p.alt || '');
   // Pexels 提供多个尺寸，优先下载接近目标分辨率的版本
   const src = pick.src || {};
   const imageUrl = src.large2x || src.large || src.original || src.medium;
@@ -589,10 +682,17 @@ async function fetchWithPexelsVideo(query, _prompt, filePath, config) {
     throw new Error(`No Pexels video results for "${query}"`);
   }
 
-  // 在前 3 个结果里找最合适的文件：优先宽 ≥750 的最小文件（省带宽），兜底取可用最大
+  // 候选重排：按 query 词与视频 url slug 匹配度挑最贴切的片段，再在其文件里选合适的分辨率
+  const ranked = videos
+    .slice(0, 10)
+    .map((video) => ({ video, score: scoreStockCandidate(query, video.url || '') }))
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.video);
+
+  // 在前 3 个重排结果里找最合适的文件：优先宽 ≥750 的最小文件（省带宽），兜底取可用最大
   let bestFile = null;
   let bestVideo = null;
-  for (const video of videos.slice(0, 3)) {
+  for (const video of ranked.slice(0, 3)) {
     const files = (video.video_files || []).filter(
       (f) => f.link && (f.file_type || '').includes('mp4')
     );
@@ -677,6 +777,110 @@ async function fetchWithWanx(query, prompt, filePath, config) {
   }
 }
 
+function probeMediaDuration(filePath) {
+  try {
+    const result = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', filePath],
+      { encoding: 'utf8', timeout: 15000 }
+    );
+    const duration = parseFloat((result.stdout || '').trim());
+    return Number.isFinite(duration) && duration > 0 ? duration : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function runBlJson(args, timeoutMs) {
+  const result = spawnSync('bl', args, {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    throw new Error((result.stderr || result.stdout || '').trim() || `bl ${args.slice(0, 2).join(' ')} failed: ${result.status}`);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (_e) {
+    throw new Error(`bl 输出不是 JSON: ${String(result.stdout).slice(0, 200)}`);
+  }
+}
+
+// Seedance 生成式视频兜底：stock 视频搜不到贴合内容时，用 bl video generate
+// 按 storyboard 的 visual_prompt 直接生成 5s 竖屏片段（与人物形象生成同一套 bl 模式）。
+async function fetchWithSeedanceVideo(query, prompt, filePath, config) {
+  if (config.enabled === false) {
+    throw new Error('seedance_video 已在配置中禁用');
+  }
+  if (!commandExists('bl')) {
+    throw new Error('bl 未安装，无法使用 seedance_video provider');
+  }
+  const ratio = config.ratio || '9:16';
+  const duration = config.duration || 5;
+  const resolution = config.resolution || '720P';
+  const pollIntervalSec = config.poll_interval_sec || 5;
+  const maxPollSec = config.max_poll_sec || 300;
+  const finalPrompt = prompt || query || 'business editorial b-roll';
+
+  const submitArgs = [
+    'video', 'generate',
+    '--prompt', finalPrompt,
+    '--ratio', ratio,
+    '--resolution', resolution,
+    '--duration', String(duration),
+    '--watermark', 'false',
+    '--no-wait',
+    '--output', 'json',
+  ];
+  if (config.model) submitArgs.push('--model', config.model);
+  const submitted = runBlJson(submitArgs, 60000);
+  const taskId = submitted.task_id || submitted.taskId;
+  if (!taskId) {
+    throw new Error('bl video generate 未返回 task_id');
+  }
+  console.log(`    🚀 seedance 任务已提交: ${taskId}`);
+
+  const deadline = Date.now() + maxPollSec * 1000;
+  let status = 'UNKNOWN';
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalSec * 1000));
+    let info = null;
+    try {
+      info = runBlJson(['video', 'task', 'get', '--task-id', taskId, '--output', 'json'], 30000);
+    } catch (_e) {
+      continue; // 查询失败视为仍在运行
+    }
+    status = info.task_status || info.status || 'UNKNOWN';
+    if (status === 'SUCCEEDED') break;
+    if (status === 'FAILED') {
+      throw new Error(`seedance 任务失败: ${info.error || info.message || ''}`);
+    }
+  }
+  if (status !== 'SUCCEEDED') {
+    throw new Error(`seedance 任务超时（>${maxPollSec}s）`);
+  }
+
+  const dl = spawnSync('bl', ['video', 'download', '--task-id', taskId, '--out', filePath], {
+    encoding: 'utf8',
+    timeout: 180000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (dl.status !== 0) {
+    throw new Error((dl.stderr || '').trim() || 'bl video download failed');
+  }
+
+  return {
+    provider: 'seedance_video',
+    type: 'video',
+    duration: probeMediaDuration(filePath) || duration,
+    sourceUrl: '',
+    license: 'Generated',
+    author: 'Seedance / bl',
+    attributionRequired: false,
+  };
+}
+
 function hslToHex(h, s, l) {
   s /= 100;
   l /= 100;
@@ -734,6 +938,7 @@ async function fetchWithPlaceholder(_query, _prompt, filePath, _config) {
 const PROVIDERS = {
   pexels: fetchWithPexels,
   pexels_video: fetchWithPexelsVideo,
+  seedance_video: fetchWithSeedanceVideo,
   unsplash: fetchWithUnsplash,
   wanx: fetchWithWanx,
   placeholder: fetchWithPlaceholder,
@@ -742,6 +947,7 @@ const PROVIDERS = {
 // provider 名 → 产物扩展名与类型
 const PROVIDER_MEDIA = {
   pexels_video: { ext: '.mp4', type: 'video' },
+  seedance_video: { ext: '.mp4', type: 'video' },
 };
 const providerMedia = (providerName) => PROVIDER_MEDIA[providerName] || { ext: '.png', type: 'image' };
 
@@ -752,12 +958,20 @@ function isValidMedia(filePath) {
   return filePath.endsWith('.mp4') ? size > 50 * 1024 : size > 2000;
 }
 
-// preferVideo=true 时把 pexels_video 插到链首，图片 provider 兜底
+// preferVideo=true 时把视频 provider 插到链首（库存视频优先，生成式视频兜底），图片 provider 兜底
 async function fetchSceneVisual(query, prompt, basePathNoExt, config, preferVideo) {
   let providers = (config.providers || ['placeholder']).filter((p) => PROVIDERS[p]);
   if (!providers.length) providers = ['placeholder'];
-  if (preferVideo && !providers.includes('pexels_video')) {
-    providers = ['pexels_video', ...providers];
+  if (preferVideo) {
+    for (const videoProvider of ['seedance_video', 'pexels_video']) {
+      if (!providers.includes(videoProvider)) {
+        providers = [videoProvider, ...providers];
+      }
+    }
+  } else {
+    // 非视频窗口下即使配置了视频 provider 也跳过，避免图文混排
+    providers = providers.filter((p) => providerMedia(p).type !== 'video');
+    if (!providers.length) providers = ['placeholder'];
   }
 
   for (const providerName of providers) {
@@ -765,11 +979,13 @@ async function fetchSceneVisual(query, prompt, basePathNoExt, config, preferVide
     const filePath = `${basePathNoExt}${media.ext}`;
     try {
       console.log(`  尝试 ${providerName}: "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}"`);
-      // 视频 provider 复用 pexels 的 api_key 配置段
+      // 视频 provider 复用各自配置段（pexels_video 复用 pexels 的 api_key）
       const providerConfig =
         providerName === 'pexels_video'
           ? { ...(config.pexels || {}), ...(config.pexels_video || {}) }
-          : config[providerName] || {};
+          : providerName === 'seedance_video'
+            ? { ...(config.seedance || {}) }
+            : config[providerName] || {};
       const meta = await PROVIDERS[providerName](query, prompt, filePath, providerConfig);
       if (isValidMedia(filePath)) {
         console.log(`  ✅ ${providerName} 成功 -> ${filePath}`);
@@ -781,6 +997,104 @@ async function fetchSceneVisual(query, prompt, basePathNoExt, config, preferVide
   }
 
   throw new Error(`All scene visual providers failed for ${basePathNoExt}`);
+}
+
+// -------------- 全局素材缓存 --------------
+// 与 build_scene_visuals_from_existing.js 同一套：sha1(query+type) 作为 key，
+// 命中即 symlink 到场景目录，避免跨任务重复下载/生成；LRU 500 文件 / 2GB。
+const CACHE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'mp4'];
+const CACHE_MAX_FILES = 500;
+const CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+
+const sceneCacheDir = () =>
+  process.env.SCENE_VISUALS_CACHE_DIR || path.join(projectDir, 'public', 'scene_visuals', '_cache');
+
+const sceneCacheKey = (query, mediaKind) =>
+  crypto.createHash('sha1').update(`${query || ''}|${mediaKind}`).digest('hex');
+
+const sceneCacheLookup = (key) => {
+  const dir = sceneCacheDir();
+  for (const ext of CACHE_EXTS) {
+    const file = path.join(dir, `${key}.${ext}`);
+    if (fs.existsSync(file)) {
+      const now = new Date();
+      try {
+        fs.utimesSync(file, now, now);
+      } catch (_e) {}
+      return file;
+    }
+  }
+  return null;
+};
+
+const sceneCacheStore = (key, srcFile) => {
+  try {
+    const dir = sceneCacheDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const ext = path.extname(srcFile).slice(1).toLowerCase();
+    const dest = path.join(dir, `${key}.${ext}`);
+    fs.copyFileSync(srcFile, dest);
+    return dest;
+  } catch (_e) {
+    return null;
+  }
+};
+
+const sceneCachePrune = () => {
+  const dir = sceneCacheDir();
+  if (!fs.existsSync(dir)) return;
+  const entries = fs
+    .readdirSync(dir)
+    .filter((f) => CACHE_EXTS.includes(path.extname(f).slice(1).toLowerCase()))
+    .map((f) => {
+      const st = fs.statSync(path.join(dir, f));
+      return { file: path.join(dir, f), size: st.size, mtime: st.mtimeMs };
+    })
+    .sort((a, b) => a.mtime - b.mtime);
+  let totalBytes = entries.reduce((sum, e) => sum + e.size, 0);
+  while (entries.length > CACHE_MAX_FILES || totalBytes > CACHE_MAX_BYTES) {
+    const oldest = entries.shift();
+    try {
+      fs.unlinkSync(oldest.file);
+      totalBytes -= oldest.size;
+    } catch (_e) {
+      break;
+    }
+  }
+};
+
+// 命中缓存时把缓存文件链接/拷贝到场景目录，返回 meta；未命中返回 null
+function reuseFromSceneCache(key, basePathNoExt) {
+  const cached = sceneCacheLookup(key);
+  if (!cached) return null;
+  const ext = path.extname(cached).toLowerCase();
+  const dest = `${basePathNoExt}${ext}`;
+  try {
+    ensureDir(dest);
+    if (!fs.existsSync(dest)) {
+      try {
+        fs.symlinkSync(cached, dest);
+      } catch (_e) {
+        fs.copyFileSync(cached, dest);
+      }
+    }
+    if (!isValidMedia(dest)) return null;
+    const isVideo = ext === '.mp4';
+    return {
+      meta: {
+        provider: 'cache',
+        type: isVideo ? 'video' : 'image',
+        ...(isVideo ? { duration: probeMediaDuration(dest) || undefined } : {}),
+        sourceUrl: '',
+        license: 'Cached',
+        author: '',
+        attributionRequired: false,
+      },
+      filePath: dest,
+    };
+  } catch (_e) {
+    return null;
+  }
 }
 
 // -------------- 主流程 --------------
@@ -801,21 +1115,25 @@ const main = async () => {
   }
 
   const totalDuration = cues[cues.length - 1].end;
-  const sceneCount = Math.max(1, Math.ceil(totalDuration / SCENE_DURATION));
-  const segmentDuration = totalDuration / sceneCount;
 
   const shots = loadStoryboard();
   if (shots) {
     console.log(`🎬 已加载分镜脚本: ${shots.length} 个镜头`);
   }
 
+  // 分镜驱动：把相邻短镜头合并成 6–15s 的画面窗口，让画面切换对齐口播句子；
+  // 无分镜时回退到 42s 定长切分。
+  const windows = buildVisualWindows(cues, shots, totalDuration);
+  const sceneCount = windows.length;
+  console.log(`🎞️  画面窗口: ${sceneCount} 个（${shots && shots.length ? '分镜驱动' : '定长回退'}）`);
+
   const buildSceneText = (i) => {
-    const start = i * segmentDuration;
-    const end = i === sceneCount - 1 ? totalDuration : (i + 1) * segmentDuration;
-    const segmentCues = cues.filter((c) => c.start >= start && c.start < end);
+    const win = windows[i];
+    const segmentCues = cues.filter((c) => c.start >= win.start && c.start < win.end);
     const text = segmentCues.map((c) => c.text).join(' ');
-    const sceneShots = getShotsForScene(shots, start, end);
-    return { start, end, text, shots: sceneShots };
+    const sceneShots =
+      win.shots && win.shots.length > 0 ? win.shots : getShotsForScene(shots, win.start, win.end);
+    return { start: win.start, end: win.end, text, shots: sceneShots };
   };
 
   const buildSceneInfo = (i, llmResult) => {
@@ -884,8 +1202,8 @@ const main = async () => {
   const processScene = async (i, llmResult) => {
     const info = buildSceneInfo(i, llmResult);
 
-    // media_type: image（默认）| video（全视频 B-roll）| mixed（奇偶交替）
-    const mediaType = config.media_type || 'image';
+    // media_type: image | video（全视频 B-roll）| mixed（奇偶交替，默认）
+    const mediaType = config.media_type || 'mixed';
     const preferVideo = mediaType === 'video' || (mediaType === 'mixed' && i % 2 === 0);
 
     // 复用检查：两种扩展名都算（按偏好排序）
@@ -894,6 +1212,8 @@ const main = async () => {
       : [`${info.basePathNoExt}.png`, `${info.basePathNoExt}.mp4`];
     const reusedPath =
       process.env.FORCE_VISUALS !== '1' ? reuseCandidates.find((p) => isValidMedia(p)) : null;
+
+    const globalCacheKey = sceneCacheKey(info.query, preferVideo ? 'video' : 'image');
 
     let meta;
     let filePath;
@@ -908,10 +1228,26 @@ const main = async () => {
         author: '',
         attributionRequired: false,
       };
+      if (meta.type === 'video') {
+        const dur = probeMediaDuration(reusedPath);
+        if (dur) meta.duration = dur;
+      }
     } else {
-      const result = await fetchSceneVisual(info.query, info.prompt, info.basePathNoExt, config, preferVideo);
-      meta = result.meta;
-      filePath = result.filePath;
+      let cachedResult = null;
+      if (process.env.FORCE_VISUALS !== '1') {
+        cachedResult = reuseFromSceneCache(globalCacheKey, info.basePathNoExt);
+      }
+      if (cachedResult) {
+        console.log(`💾 命中全局缓存: ${globalCacheKey.slice(0, 8)} -> ${cachedResult.filePath}`);
+        meta = cachedResult.meta;
+        filePath = cachedResult.filePath;
+      } else {
+        const result = await fetchSceneVisual(info.query, info.prompt, info.basePathNoExt, config, preferVideo);
+        meta = result.meta;
+        filePath = result.filePath;
+        // 写入全局缓存，后续任务同 query 直接复用
+        sceneCacheStore(globalCacheKey, filePath);
+      }
     }
     const relativePath = path.relative(path.join(process.cwd(), 'public'), filePath);
     const sceneVisual = {
@@ -971,11 +1307,24 @@ const main = async () => {
   }
 
   saveKeywordCache();
+  sceneCachePrune();
   fs.writeFileSync(outputJsonPath, JSON.stringify(visuals, null, 2));
   console.log(`Prepared ${visuals.length} scene visuals to ${outputJsonPath}`);
 };
 
-main().catch((err) => {
-  console.error('❌ 场景画面准备失败:', err.message);
-  process.exit(1);
-});
+if (isMain) {
+  main().catch((err) => {
+    console.error('❌ 场景画面准备失败:', err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  buildVisualWindows,
+  scoreStockCandidate,
+  pickBestCandidate,
+  sceneCacheKey,
+  SCENE_DURATION,
+  WINDOW_MIN_SECONDS,
+  WINDOW_MAX_SECONDS,
+};

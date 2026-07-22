@@ -92,7 +92,7 @@ Workdir cloning (`prepareReuseWorkdir`) uses Node's `fs.cpSync` (Node ≥ 16.7) 
 
 ## 9. Testing
 
-`npm test` runs 19 offline suites plus `tsc --noEmit`, covering all critical paths. `npm run test:fast` runs the same suites except the API integration test and the TypeScript check (18 suites) for a quicker loop.
+`npm test` runs 20 offline suites plus `tsc --noEmit`, covering all critical paths. `npm run test:fast` runs the same suites except the API integration test and the TypeScript check (19 suites) for a quicker loop.
 
 | Suite | What it guards |
 |-------|---------------|
@@ -110,6 +110,7 @@ Workdir cloning (`prepareReuseWorkdir`) uses Node's `fs.cpSync` (Node ≥ 16.7) 
 | `test_validate_subtitles.js` | `validate_subtitles.js` CLI directly (exit codes, stderr, word-level checks) |
 | `test_validate_article.js` | Article quality pre-check (length, code/table share, Chinese ratio; stub-script injection) |
 | `test_scene_visuals_cache.js` | Scene asset cache (hash hit, symlink, LRU eviction) |
+| `test_scene_visuals_windows.js` | Shot-driven visual windows (6–15s merge, 42s fallback), stock candidate rerank, cache key |
 | `test_api_server.js` | Full API integration (CRUD, run/rebuild/retry, versioning, auth, webhook, SSE keepalive, multi-host, article pre-check, schedule/trigger, script versions, preview) |
 | `test_pipeline_state.sh` | Pipeline state machine (init/get/set/mark, concurrency, corruption recovery) |
 | `test_validate_config.sh` | Caption DNA id pre-flight validation (accept valid, reject invalid) |

@@ -142,6 +142,7 @@
     }
   },
   "scene_visuals": {
+    "media_type": "mixed",
     "providers": [
       "pexels",
       "unsplash",
@@ -159,6 +160,15 @@
     "wanx": {
       "model": "doubao-seedream-3-0",
       "size": "1024x1024"
+    },
+    "seedance": {
+      "enabled": true,
+      "model": "",
+      "ratio": "9:16",
+      "resolution": "720P",
+      "duration": 5,
+      "poll_interval_sec": 5,
+      "max_poll_sec": 300
     },
     "llm": {
       "enabled": true,

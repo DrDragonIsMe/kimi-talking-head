@@ -1,9 +1,10 @@
 import React from 'react';
-import { interpolate, staticFile, useCurrentFrame, useVideoConfig, OffthreadVideo, Loop } from 'remotion';
+import { interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 import { useSubtitles, SubtitleCue } from '../hooks/useSubtitles';
 import { matchSceneStyle, extractTalkingPoints } from '../utils/keywordMatcher';
 import { getActiveCueIndex, getOverlayLayoutPreset, OverlayLayoutConfig } from '../utils/overlayLayout';
 import { getSceneWindow, getKenBurnsTransform, getSceneTransition } from '../utils/sceneMotion';
+import { SceneMedia } from './SceneMedia';
 import { ChartLines } from './effects/ChartLines';
 import { PulseWarning } from './effects/PulseWarning';
 import { GridFlow } from './effects/GridFlow';
@@ -39,24 +40,6 @@ interface DynamicBackgroundProps {
   variant?: 'default' | 'hero';
 }
 
-/** 场景素材：image 用 <img>；video（B-roll）用 OffthreadVideo，按片段时长 Loop 循环 */
-const SceneMedia: React.FC<{
-  visual: { path: string; type?: 'image' | 'video'; duration?: number };
-  style: React.CSSProperties;
-}> = ({ visual, style }) => {
-  const { fps } = useVideoConfig();
-  if (visual.type === 'video') {
-    const video = <OffthreadVideo src={staticFile(visual.path)} muted style={style} />;
-    if (visual.duration && visual.duration > 0) {
-      return (
-        <Loop durationInFrames={Math.max(1, Math.round(visual.duration * fps))}>{video}</Loop>
-      );
-    }
-    return video;
-  }
-  return <img src={staticFile(visual.path)} style={style} />;
-};
-
 export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, subtitles, layout, sceneVisuals = [], variant = 'default' }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -79,12 +62,15 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
   const baseColor = style ? style.bgColor : '#FAFAF7';
   const sceneWindow = getSceneWindow(sceneVisuals, currentTime);
   const activeVisual = sceneWindow.current;
-  const kenBurns = activeVisual
-    ? getKenBurnsTransform(sceneWindow.index, sceneWindow.sceneProgress)
-    : null;
-  const previousKenBurns = sceneWindow.previous
-    ? getKenBurnsTransform(sceneWindow.index - 1, 1)
-    : null;
+  // 视频 B-roll 自带运动，跳过 Ken Burns，避免「运动叠运动」画面发晃；仅保留交叉淡化切换
+  const kenBurns =
+    activeVisual && activeVisual.type !== 'video'
+      ? getKenBurnsTransform(sceneWindow.index, sceneWindow.sceneProgress)
+      : null;
+  const previousKenBurns =
+    sceneWindow.previous && sceneWindow.previous.type !== 'video'
+      ? getKenBurnsTransform(sceneWindow.index - 1, 1)
+      : null;
 
   const kenBurnsCss = (t: { scale: number; translateX: number; translateY: number }) =>
     `scale(${t.scale}) translate(${t.translateX}%, ${t.translateY}%)`;
@@ -180,7 +166,7 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
       >
         {activeVisual ? (
           <>
-            {isHero && sceneWindow.previous && previousKenBurns ? (
+            {isHero && sceneWindow.previous ? (
               <SceneMedia
                 visual={sceneWindow.previous}
                 style={{
@@ -190,7 +176,7 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
                   height: '100%',
                   objectFit: 'cover',
                   opacity: transition === 'fade' ? 1 - fadeProgress : 1,
-                  transform: kenBurnsCss(previousKenBurns),
+                  transform: previousKenBurns ? kenBurnsCss(previousKenBurns) : undefined,
                   transformOrigin: 'center center',
                   filter: 'contrast(1.02) saturate(0.95)',
                 }}
@@ -290,8 +276,8 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = ({ srtPath, s
         }}
       >
         {activeVisual ? (
-          <img
-            src={staticFile(activeVisual.path)}
+          <SceneMedia
+            visual={activeVisual}
             style={{
               width: '100%',
               height: '100%',

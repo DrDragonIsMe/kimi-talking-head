@@ -8,6 +8,7 @@ import type { ContentOverlayConfig, SceneVisual } from '../index';
 import type { SubtitleCue, HeroMoment } from '../hooks/useSubtitles';
 import { getCaptionDna } from '../themes/captions';
 import { matchSceneStyle } from '../utils/keywordMatcher';
+import { SceneMedia } from './SceneMedia';
 
 interface ProductLaunchLayoutProps {
   audioPath: string;
@@ -107,9 +108,8 @@ export const ProductLaunchLayout: React.FC<ProductLaunchLayoutProps> = ({
         }}
       >
         {visual ? (
-          <img
-            src={staticFile(visual.path)}
-            alt=""
+          <SceneMedia
+            visual={visual}
             style={{
               maxWidth: '100%',
               maxHeight: '100%',

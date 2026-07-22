@@ -15,8 +15,9 @@
 - **唇形同步**：基于 [InfiniteTalk](https://github.com/MeiGen-AI/InfiniteTalk) 将主播照片与音频合成口型匹配视频。
 - **工程级字幕**：Whisper 词级时间戳 + 口播稿字符级对齐，字幕内容严格等于原文，且自动校验稿音一致性。
 - **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote / cream / editorial / documentary` 六套字幕 DNA 可选，hero 全屏时刻由 `HeroOverlay` 统一渲染、任意 DNA 下均与入场音效同步可见。
-- **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移，场景间 fade/wipe/zoom 三种转场确定性轮换。
-- **视频 B-roll**：`scene_visuals.media_type` 支持 `video / mixed`，Pexels 视频素材自动检索下载、按片段时长循环铺满场景，图片 provider 自动兜底。
+- **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移（视频画面自动跳过，避免运动叠加发晃），场景间 fade/wipe/zoom 三种转场确定性轮换。
+- **镜头级场景画面**：有分镜时按 storyboard 镜头合并成 6–15s 画面窗口（一句话一换，紧贴讲述内容），LLM 用整段口播 + 镜头描述生成检索词，stock 候选按匹配度重排；无分镜时回退 42s 定长切分。
+- **视频 B-roll**：`scene_visuals.media_type` 支持 `video / mixed`（默认 mixed，奇偶交替）；Pexels 库存视频优先检索，搜不到时用 `bl` Seedance 按镜头 visual_prompt 生成 5s 竖屏视频兜底，图片 provider 最后兜底。
 - **音频可视化**：底部实时波形条（`visualizeAudio` 驱动，可关闭）。
 - **BGM 与音效**：BGM 循环垫底、首尾淡入淡出；hero 时刻自动配入场音效（`assets/sfx/hero.*` 优先，缺失时 ffmpeg 合成兜底）。
 - **竖屏分镜布局**：`portrait-hybrid` 模式支持 `default / host-focus / visual-focus / minimal / balanced` 五种预设。
@@ -31,7 +32,7 @@
 - **渐进式预览**：`video_layout.preview.enabled=true` 时 render 阶段先出 0.33 倍低清预览（跳过 BGM/音效），SSE 推送后即可在线播放，成品就绪自动替换。
 - **定时任务与外部触发**：任务可绑定 cron 定时调度（node-cron），或通过 `POST /api/v1/trigger/<token>` 由外部系统触发。
 - **口播稿版本**：每次保存口播稿自动备份历史版本（`script.v{N}.txt`），可随时只读回溯。
-- **场景素材缓存**：Pexels/AI 场景素材按 query/prompt 哈希全局缓存（`public/scene_visuals/_cache/`，LRU 上限 500 文件/2GB），跨任务去重。
+- **场景素材缓存**：Pexels/AI 场景素材（含视频）按 query+类型 哈希全局缓存（`public/scene_visuals/_cache/`，LRU 上限 500 文件/2GB），跨任务去重；下载与本地素材重建两条路径共用。
 
 ---
 
@@ -369,7 +370,8 @@ bash scripts/generate_customer_voices.sh  # 6 段变调女声参考音频
 - `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）。hero 关键词全屏时刻由 `HeroOverlay` 统一渲染，任意 DNA 下都会与入场音效同步出现
 - `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
 - `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
-- `scene_visuals.media_type`：场景素材类型，`image`（默认）/ `video`（全视频 B-roll）/ `mixed`（奇偶交替）
+- `scene_visuals.media_type`：场景素材类型，`image` / `video`（全视频 B-roll）/ `mixed`（默认，奇偶交替）；视频窗口按 `pexels_video → seedance_video → 图片链` 兜底
+- `scene_visuals.seedance.*`：生成式视频配置（`enabled` / `model` / `ratio` / `resolution` / `duration` / `poll_interval_sec` / `max_poll_sec`），依赖 `bl` CLI；`enabled=false` 时跳过生成式视频
 - `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）
 - `video_layout.hybrid.showWaveform`：底部音频波形条（默认开）
 - `video_layout.hybrid.chapterCardScale`：章节观点卡片整体缩放系数（卡宽、内边距、字号同比，默认 1.3）；卡片堆叠起点为画布高度 1/6 处
@@ -469,6 +471,7 @@ npm run build      # TypeScript 检查
 | `test_validate_subtitles.js` | `validate_subtitles.js` CLI 直测（退出码、stderr、词级时间戳校验） |
 | `test_validate_article.js` | 文章质量预检（长度/代码块/表格/中文占比，stub 脚本注入） |
 | `test_scene_visuals_cache.js` | 场景素材缓存（hash 命中、符号链接、LRU 清理） |
+| `test_scene_visuals_windows.js` | 镜头级画面窗口（分镜合并 6–15s、42s 回退）、stock 候选重排、缓存 key |
 | `test_api_server.js` | 完整 API 集成测试（CRUD/run/rebuild/retry/版本化/鉴权/webhook/SSE 保活/多主播/文章预检/定时与 trigger/口播稿版本/预览） |
 | `test_pipeline_state.sh` | 流水线状态机（init/get/set/mark/并发/容错） |
 | `test_validate_config.sh` | DNA id 合法性预检（有效放行、无效报错退出） |
