@@ -173,6 +173,6 @@ remote_job_poll "MuseTalk" "$REMOTE_STATUS" "$REMOTE_PID_VALUE" "$REMOTE_OUTPUT_
 # 8. Download result
 # ──────────────────────────────────────────────────────────────
 echo "📥 下载 MuseTalk 唇形同步视频..."
-scp -P $PORT $SSH_OPTS "$USER@$HOST:$REMOTE_OUTPUT_VIDEO" "$VIDEO_OUTPUT"
+remote_job_scp "$USER@$HOST:$REMOTE_OUTPUT_VIDEO" "$VIDEO_OUTPUT" "$PORT"
 
 echo "✅ MuseTalk 完成: $VIDEO_OUTPUT"

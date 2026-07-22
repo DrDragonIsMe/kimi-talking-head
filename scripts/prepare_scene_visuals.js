@@ -798,12 +798,18 @@ function runBlJson(args, timeoutMs) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status !== 0) {
-    throw new Error((result.stderr || result.stdout || '').trim() || `bl ${args.slice(0, 2).join(' ')} failed: ${result.status}`);
+    const detail = [result.stderr, result.stdout]
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 300);
+    throw new Error(detail || `bl ${args.slice(0, 2).join(' ')} failed: ${result.status}`);
   }
   try {
     return JSON.parse(result.stdout);
   } catch (_e) {
-    throw new Error(`bl 输出不是 JSON: ${String(result.stdout).slice(0, 200)}`);
+    throw new Error(`bl 输出不是 JSON: ${String(result.stdout).replace(/\s+/g, ' ').slice(0, 300)}`);
   }
 }
 

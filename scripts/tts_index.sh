@@ -100,7 +100,7 @@ remote_job_init "$HOST" "$PORT" "$USER"
 echo "🎙️ 上传参考音频到服务器（$SERVER_KEY: $HOST:${PORT}）..."
 REMOTE_DIR="$WORKSPACE/voice_ref"
 ssh -p "$PORT" $SSH_OPTS "$USER@$HOST" "mkdir -p $REMOTE_DIR"
-scp -P "$PORT" $SSH_OPTS "$REFERENCE_AUDIO" "$USER@$HOST:$REMOTE_DIR/$REF_BASENAME"
+remote_job_scp "$REFERENCE_AUDIO" "$USER@$HOST:$REMOTE_DIR/$REF_BASENAME" "$PORT"
 
 # TTS_PATH may be either the directory containing remote_worker.py or a wrapper
 # script; derive the root directory accordingly.
@@ -192,7 +192,7 @@ remote_job_poll "TTS" "$REMOTE_STATUS" "$REMOTE_PID_VALUE" "$REMOTE_OUTPUT" "$RE
     "$REMOTE_LOG" "$POLL_INTERVAL" "$MAX_POLL_MINUTES"
 
 echo "📥 下载 TTS 音频到本地..."
-scp -P $PORT $SSH_OPTS "$USER@$HOST:$REMOTE_OUTPUT" "$OUTPUT_AUDIO"
+remote_job_scp "$USER@$HOST:$REMOTE_OUTPUT" "$OUTPUT_AUDIO" "$PORT"
 
 if ! has_valid_local_audio "$OUTPUT_AUDIO"; then
     echo "❌ 下载后的 TTS 音频无效或时长过短: $OUTPUT_AUDIO" >&2

@@ -6,6 +6,8 @@ REMOTE_REL_PATH=$2
 CONFIG="config/servers.json"
 SSH_OPTS="-o ServerAliveInterval=60 -o ServerAliveCountMax=7"
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/remote_job.sh"
+
 if SERVER_INFO=$(bash scripts/check_server.sh primary 2>/dev/null); then
     HOST=$(echo "$SERVER_INFO" | cut -d: -f2)
     PORT=$(echo "$SERVER_INFO" | cut -d: -f3)
@@ -28,6 +30,6 @@ fi
 
 REMOTE_DIR="$WORKSPACE/$(dirname $REMOTE_REL_PATH)"
 ssh -p $PORT $SSH_OPTS $USER@$HOST "mkdir -p $REMOTE_DIR"
-scp -P $PORT -o ServerAliveInterval=60 -o ServerAliveCountMax=7 "$LOCAL_FILE" "$USER@$HOST:$WORKSPACE/$REMOTE_REL_PATH"
+remote_job_scp "$LOCAL_FILE" "$USER@$HOST:$WORKSPACE/$REMOTE_REL_PATH" "$PORT"
 
 echo "$HOST:$PORT:$USER:$WORKSPACE"

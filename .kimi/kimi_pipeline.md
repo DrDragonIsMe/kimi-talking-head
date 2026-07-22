@@ -155,6 +155,16 @@ bash /root/aigc_apps/start.sh
 - 匹配率 < 65% 直接报错退出。
 - 复用旧音频时务必同时复用对应的 `script.txt` 和 `subtitles_raw.json`。
 
+## 6.5 场景画面（镜头级 + 视频 B-roll）
+
+`scripts/prepare_scene_visuals.js` 负责场景画面：
+
+- **画面粒度**：有分镜时把相邻短镜头合并成 6–15s 的画面窗口（一句话一换，紧贴口播）；无分镜时回退 42s 定长切分。
+- **检索词**：LLM 用整段口播 + 镜头 subject/setting/visual_prompt 生成英文 query，stock 候选 top-10 按匹配度重排。
+- **视频 B-roll**：`scene_visuals.media_type` 为 `video` / `mixed`（默认 mixed，奇偶交替）时，视频窗口按 `pexels_video → seedance_video → 图片链` 兜底；`seedance_video` 用 `bl video generate` 按镜头 visual_prompt 生成 5s 竖屏片段（`scene_visuals.seedance.*` 配置）。
+- **缓存**：下载与生成结果按 sha1(query+类型) 写入全局 `public/scene_visuals/_cache/`（LRU 500 文件 / 2GB），跨任务复用。
+- **渲染**：视频画面自动跳过 Ken Burns，仅保留交叉淡化；`SceneMedia` 组件统一处理图片/视频。
+
 ## 7. 故障排查
 
 | 问题 | 解决 |
@@ -163,6 +173,7 @@ bash /root/aigc_apps/start.sh
 | 字幕校准失败（match < 65%） | 脚本与音频不一致，重新生成 TTS 或复用正确的源稿 |
 | ComfyUI numpy/opencv 报错 | 服务器执行 `pip install "numpy<2.2" "opencv-python>=4.10"` |
 | SSH 连接失败 | 检查 `~/.ssh/config`，运行 `bash scripts/check_server.sh` |
+| scp 报 `Connection closed` | 已内置 `remote_job_scp` 自动重试（3 次，10s/20s 退避）；仍失败说明服务器/网络持续异常，查 `bash scripts/check_server.sh` |
 | 服务器 git 报 `detected dubious ownership` | 不要在该目录操作 git，自定义脚本在本地 `server/` 维护 |
 | MuseTalk 人脸检测失败 | 确保 `host.video_source` 视频为正面、清晰、无遮挡人脸；检查 `models/mmdet/` 与 `models/mmpose/` 权重是否就位 |
 | MuseTalk `mmcv` / `mmdet` 导入报错 | 在 MuseTalk venv 中重新安装：`mim install "mmcv==2.0.1" mmdet==3.1.0 mmpose==1.1.0` |

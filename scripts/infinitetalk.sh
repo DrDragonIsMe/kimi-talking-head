@@ -138,6 +138,6 @@ remote_job_poll "InfiniteTalk" "$REMOTE_STATUS" "$REMOTE_PID_VALUE" "$REMOTE_OUT
     "$REMOTE_LOG.stderr" "$POLL_INTERVAL" "$MAX_POLL_MINUTES"
 
 echo "📥 下载唇形同步视频..."
-scp -P $PORT $SSH_OPTS "$USER@$HOST:$REMOTE_OUTPUT" "$VIDEO_OUTPUT"
+remote_job_scp "$USER@$HOST:$REMOTE_OUTPUT" "$VIDEO_OUTPUT" "$PORT"
 
 echo "✅ InfiniteTalk 完成: $VIDEO_OUTPUT"

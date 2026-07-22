@@ -436,6 +436,68 @@ EOF
   assert_eq "primary primary.example 22 root" "$out" "select: empty workers array falls back to primary"
 }
 
+# --- remote_job_scp（scp 重试）---
+# 用 SCP_STUB_FAIL_TIMES 控制 fake scp 前 N 次失败，验证重试与耗尽行为。
+
+_stub_scp_flaky() {
+  cat > "$SSH_STUB_DIR/bin/scp" << 'STUB_EOF'
+#!/bin/bash
+echo "scp $*" >> "$SSH_STUB_DIR/invocations.log"
+count=$(wc -l < "$SSH_STUB_DIR/scp_attempts" 2>/dev/null | tr -d ' ')
+count=${count:-0}
+echo x >> "$SSH_STUB_DIR/scp_attempts"
+if [ "$count" -lt "${SCP_STUB_FAIL_TIMES:-0}" ]; then
+  echo "scp: Connection closed" >&2
+  exit 1
+fi
+exit 0
+STUB_EOF
+  chmod +x "$SSH_STUB_DIR/bin/scp"
+  : > "$SSH_STUB_DIR/scp_attempts"
+}
+
+test_scp_first_try_success() {
+  _stub_scp_flaky
+  export SCP_STUB_FAIL_TIMES=0 REMOTE_JOB_SCP_RETRY_DELAY=0
+  if remote_job_scp local.wav "root@host.example:/tmp/out.wav" 22; then
+    pass_test "scp: first-try success returns 0"
+  else
+    fail_test "scp: first-try success returns 0"
+  fi
+  local lines
+  lines=$(grep -c '^scp ' "$SSH_STUB_DIR/invocations.log" || true)
+  assert_eq "1" "$lines" "scp: first-try success attempts once"
+  unset SCP_STUB_FAIL_TIMES
+}
+
+test_scp_retry_then_success() {
+  _stub_scp_flaky
+  export SCP_STUB_FAIL_TIMES=2 REMOTE_JOB_SCP_RETRY_DELAY=0
+  if remote_job_scp local.wav "root@host.example:/tmp/out.wav" 22 2>/dev/null; then
+    pass_test "scp: retry succeeds after 2 failures"
+  else
+    fail_test "scp: retry succeeds after 2 failures"
+  fi
+  local lines
+  lines=$(grep -c '^scp ' "$SSH_STUB_DIR/invocations.log" || true)
+  assert_eq "3" "$lines" "scp: retried up to 3 attempts"
+  unset SCP_STUB_FAIL_TIMES
+}
+
+test_scp_exhausts_retries() {
+  _stub_scp_flaky
+  export SCP_STUB_FAIL_TIMES=99 REMOTE_JOB_SCP_RETRY_DELAY=0 REMOTE_JOB_SCP_RETRIES=3
+  if remote_job_scp local.wav "root@host.example:/tmp/out.wav" 22 2>/dev/null; then
+    fail_test "scp: exhausts retries returns non-zero"
+  else
+    pass_test "scp: exhausts retries returns non-zero"
+  fi
+  local lines
+  lines=$(grep -c '^scp ' "$SSH_STUB_DIR/invocations.log" || true)
+  assert_eq "3" "$lines" "scp: stops after exactly 3 attempts"
+  unset SCP_STUB_FAIL_TIMES REMOTE_JOB_SCP_RETRIES
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -501,6 +563,20 @@ main() {
 
   setup
   test_poll_missing_status_not_ssh_failure
+  teardown
+
+  echo ""
+  echo "--- remote_job_scp ---"
+  setup
+  test_scp_first_try_success
+  teardown
+
+  setup
+  test_scp_retry_then_success
+  teardown
+
+  setup
+  test_scp_exhausts_retries
   teardown
 
   echo ""

@@ -11,6 +11,30 @@
 # 让网络故障快速失败，ServerAlive* 保留各脚本原有的长任务连接保活。
 REMOTE_JOB_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=60 -o ServerAliveCountMax=7"
 
+# 带重试的 scp：远端连接抖动（如 "Connection closed"、短暂网络闪断）不应直接
+# 杀死整个阶段。默认 3 次尝试、10s/20s 递增退避，可用 REMOTE_JOB_SCP_RETRIES /
+# REMOTE_JOB_SCP_RETRY_DELAY 覆盖（测试时置 0 跳过等待）。
+# 用法: remote_job_scp <local> <remote> <port>
+remote_job_scp() {
+    local local_path="$1" remote_path="$2" port="$3"
+    local attempts="${REMOTE_JOB_SCP_RETRIES:-3}"
+    case "$attempts" in ''|*[!0-9]*) attempts=3 ;; esac
+    local delay="${REMOTE_JOB_SCP_RETRY_DELAY:-10}"
+    case "$delay" in ''|*[!0-9]*) delay=10 ;; esac
+    local i
+    for ((i = 1; i <= attempts; i++)); do
+        if scp -P "$port" $REMOTE_JOB_SSH_OPTS "$local_path" "$remote_path"; then
+            return 0
+        fi
+        if [ "$i" -lt "$attempts" ]; then
+            echo "⚠️ scp 失败（第 ${i}/${attempts} 次），$((i * delay))s 后重试: ${local_path} -> ${remote_path}" >&2
+            sleep $((i * delay))
+        fi
+    done
+    echo "❌ scp 连续 ${attempts} 次失败: ${local_path} -> ${remote_path}" >&2
+    return 1
+}
+
 # worker 池（P2-12）：config/servers.json 可选 workers 数组，round-robin + 可达性预检选机。
 # round-robin 游标跨进程持久化在这个状态文件里（可用 REMOTE_JOB_RR_STATE 覆盖，测试用）。
 REMOTE_JOB_RR_STATE="${REMOTE_JOB_RR_STATE:-${TMPDIR:-/tmp}/kimi_talking_head_workers.rr}"

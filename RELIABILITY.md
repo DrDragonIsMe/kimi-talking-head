@@ -32,7 +32,7 @@ Before any run, the pipeline validates:
 
 - `server/install.sh` installs ComfyUI + InfiniteTalk, IndexTTS, and MuseTalk on a fresh GPU server.
 - `server/versions.env` pins dependency versions (`*_REF` + `TORCH_SPEC`); empty values track upstream HEAD. Backfill tested commits after a verified install to make reinstalls reproducible.
-- Remote job wrappers (`scripts/tts_index.sh`, `infinitetalk.sh`, `musetalk.sh`) share `scripts/lib/remote_job.sh`: unified SSH options (`BatchMode`, `ConnectTimeout`) and a circuit breaker — 5 consecutive SSH failures abort the phase instead of waiting out the full timeout.
+- Remote job wrappers (`scripts/tts_index.sh`, `infinitetalk.sh`, `musetalk.sh`) share `scripts/lib/remote_job.sh`: unified SSH options (`BatchMode`, `ConnectTimeout`), a circuit breaker — 5 consecutive SSH failures abort the phase instead of waiting out the full timeout — and `remote_job_scp`, a retried scp wrapper (3 attempts, 10s/20s backoff, `REMOTE_JOB_SCP_RETRIES` / `REMOTE_JOB_SCP_RETRY_DELAY` overrides) so a transient `Connection closed` no longer kills a whole phase.
 - `server/server_maintenance.md` contains day-to-day runbooks.
 - Model weights are documented in [`server/MODEL_CHECKLIST.md`](server/MODEL_CHECKLIST.md); they are loaded via symlinks and are never committed.
 - The local engine is selected in `config/host_profile.json` via `lipsync.engine` (`infinitetalk` or `musetalk`).
@@ -114,7 +114,7 @@ Workdir cloning (`prepareReuseWorkdir`) uses Node's `fs.cpSync` (Node ≥ 16.7) 
 | `test_api_server.js` | Full API integration (CRUD, run/rebuild/retry, versioning, auth, webhook, SSE keepalive, multi-host, article pre-check, schedule/trigger, script versions, preview) |
 | `test_pipeline_state.sh` | Pipeline state machine (init/get/set/mark, concurrency, corruption recovery) |
 | `test_validate_config.sh` | Caption DNA id pre-flight validation (accept valid, reject invalid) |
-| `test_remote_job.sh` | Remote job helpers (SSH/SCP, submit, poll, circuit breaker, worker pool, PID extraction under noisy numeric banners) |
+| `test_remote_job.sh` | Remote job helpers (SSH/SCP, submit, poll, circuit breaker, scp retry, worker pool, PID extraction under noisy numeric banners) |
 | `test_compositions.js` | Remotion composition registration guard (portrait/landscape/square dimensions) |
 | `tsc --noEmit` | TypeScript type checking |
 
