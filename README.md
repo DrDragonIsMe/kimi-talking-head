@@ -371,7 +371,7 @@ bash scripts/generate_customer_voices.sh  # 6 段变调女声参考音频
 - `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
 - `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
 - `scene_visuals.media_type`：场景素材类型，`image` / `video`（全视频 B-roll）/ `mixed`（默认，奇偶交替）；视频窗口按 `pexels_video → seedance_video → 图片链` 兜底
-- `scene_visuals.seedance.*`：生成式视频配置（`enabled` / `model` / `ratio` / `resolution` / `duration` / `poll_interval_sec` / `max_poll_sec`），依赖 `bl` CLI；`enabled=false` 时跳过生成式视频
+- `scene_visuals.seedance.*`：生成式视频配置。`backend`：`bl`（默认，百炼 `bl video generate`，720P/1080P）/ `ark`（火山方舟 Seedance 直连 API，模型 `ark_model` 默认 `doubao-seedance-1-0-pro-fast-251015`，`ark_resolution` 默认 `480p`，API key 读 `.env` 的 `ARK_API_KEY`）；`enabled=false` 时跳过生成式视频
 - `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）
 - `video_layout.hybrid.showWaveform`：底部音频波形条（默认开）
 - `video_layout.hybrid.chapterCardScale`：章节观点卡片整体缩放系数（卡宽、内边距、字号同比，默认 1.3）；卡片堆叠起点为画布高度 1/6 处

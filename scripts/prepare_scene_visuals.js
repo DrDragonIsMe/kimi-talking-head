@@ -577,6 +577,47 @@ function httpGetJson(url, headers = {}) {
   });
 }
 
+function httpPostJson(url, body, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const client = url.startsWith('https:') ? https : http;
+    const req = client.request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          ...headers,
+        },
+        timeout: 30000,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 300)}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(new Error(`JSON parse error: ${e.message}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
 // -------------- 图片提供商 --------------
 
 async function fetchWithUnsplashApi(query, _prompt, filePath, config) {
@@ -813,11 +854,81 @@ function runBlJson(args, timeoutMs) {
   }
 }
 
+// 火山方舟 Seedance 直连（backend: "ark"）：POST /contents/generations/tasks 提交，
+// 轮询任务直到 succeeded，下载 content.video_url。API key 走 ARK_API_KEY 环境变量
+// （.env，pipeline.sh 启动时已 set -a 导出），避免把密钥写进会提交的配置文件。
+async function fetchWithArkSeedance(query, prompt, filePath, config) {
+  const apiKey = process.env.ARK_API_KEY || config.api_key || '';
+  if (!apiKey) {
+    throw new Error('ARK_API_KEY 未配置，无法使用 seedance ark backend');
+  }
+  const baseUrl = (config.ark_base_url || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/+$/, '');
+  const model = config.ark_model || 'doubao-seedance-1-0-pro-fast-251015';
+  const resolution = config.ark_resolution || '480p';
+  const ratio = config.ratio || '9:16';
+  const duration = config.duration || 5;
+  const pollIntervalSec = config.poll_interval_sec || 5;
+  const maxPollSec = config.max_poll_sec || 300;
+  const finalPrompt = `${prompt || query || 'business editorial b-roll'} --resolution ${resolution} --ratio ${ratio} --duration ${duration} --camerafixed false --watermark false`;
+
+  const submitted = await httpPostJson(
+    `${baseUrl}/contents/generations/tasks`,
+    { model, content: [{ type: 'text', text: finalPrompt }] },
+    { Authorization: `Bearer ${apiKey}` }
+  );
+  const taskId = submitted.id;
+  if (!taskId) {
+    throw new Error('ark seedance 未返回任务 id');
+  }
+  console.log(`    🚀 ark seedance 任务已提交: ${taskId}`);
+
+  const deadline = Date.now() + maxPollSec * 1000;
+  let info = null;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalSec * 1000));
+    try {
+      info = await httpGetJson(`${baseUrl}/contents/generations/tasks/${taskId}`, {
+        Authorization: `Bearer ${apiKey}`,
+      });
+    } catch (_e) {
+      continue; // 查询失败视为仍在运行
+    }
+    if (info.status === 'succeeded') break;
+    if (info.status === 'failed' || info.status === 'cancelled') {
+      throw new Error(
+        `ark seedance 任务失败: ${JSON.stringify(info.error || info).replace(/\s+/g, ' ').slice(0, 300)}`
+      );
+    }
+  }
+  if (!info || info.status !== 'succeeded') {
+    throw new Error(`ark seedance 任务超时（>${maxPollSec}s）`);
+  }
+  const videoUrl = info.content && info.content.video_url;
+  if (!videoUrl) {
+    throw new Error('ark seedance 未返回 video_url');
+  }
+  await downloadFile(videoUrl, filePath);
+
+  return {
+    provider: 'seedance_video',
+    type: 'video',
+    duration: probeMediaDuration(filePath) || duration,
+    sourceUrl: '',
+    license: 'Generated',
+    author: 'Seedance / Ark',
+    attributionRequired: false,
+  };
+}
+
 // Seedance 生成式视频兜底：stock 视频搜不到贴合内容时，用 bl video generate
 // 按 storyboard 的 visual_prompt 直接生成 5s 竖屏片段（与人物形象生成同一套 bl 模式）。
+// backend=ark 时改走火山方舟 Seedance API（见 fetchWithArkSeedance）。
 async function fetchWithSeedanceVideo(query, prompt, filePath, config) {
   if (config.enabled === false) {
     throw new Error('seedance_video 已在配置中禁用');
+  }
+  if (config.backend === 'ark') {
+    return fetchWithArkSeedance(query, prompt, filePath, config);
   }
   if (!commandExists('bl')) {
     throw new Error('bl 未安装，无法使用 seedance_video provider');

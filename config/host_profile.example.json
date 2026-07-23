@@ -131,12 +131,16 @@
     },
     "seedance": {
       "enabled": true,
+      "backend": "bl",
       "model": "",
       "ratio": "9:16",
       "resolution": "720P",
       "duration": 5,
       "poll_interval_sec": 5,
-      "max_poll_sec": 300
+      "max_poll_sec": 300,
+      "ark_model": "doubao-seedance-1-0-pro-fast-251015",
+      "ark_resolution": "480p",
+      "ark_base_url": "https://ark.cn-beijing.volces.com/api/v3"
     },
     "llm": {
       "enabled": true,
