@@ -11,6 +11,7 @@
 const assert = require('assert');
 const {
   buildVisualWindows,
+  buildProviderChain,
   scoreStockCandidate,
   pickBestCandidate,
   sceneCacheKey,
@@ -126,6 +127,38 @@ console.log('=== sceneCacheKey ===');
   assert.strictEqual(k1, k2, '同输入同 key');
   assert.notStrictEqual(k1, k3, 'image/video 应区分缓存');
   assert.match(k1, /^[0-9a-f]{40}$/, 'sha1 hex');
+}
+
+console.log('=== buildProviderChain ===');
+{
+  const baseConfig = { providers: ['pexels', 'unsplash', 'wanx', 'placeholder'], seedance: { enabled: true } };
+
+  // preferVideo + 有 ARK key：ark 第一、库存居中、bl 垫底、placeholder 收尾
+  process.env.ARK_API_KEY = 'test-key';
+  let chain = buildProviderChain(baseConfig, true);
+  assert.strictEqual(chain[0], 'seedance_ark', 'ark 应在链首');
+  assert.ok(chain.indexOf('pexels_video') < chain.indexOf('pexels'), 'pexels_video 在图片库存前');
+  assert.ok(chain.indexOf('seedance_bl') > chain.indexOf('pexels'), 'bl 应在库存之后（最贵垫底）');
+  assert.ok(chain.indexOf('seedance_bl') < chain.indexOf('placeholder'), 'bl 在 placeholder 前');
+  assert.strictEqual(chain[chain.length - 1], 'placeholder', 'placeholder 收尾');
+
+  // 无 ARK key：跳过 ark，库存顶前，bl 仍垫底
+  delete process.env.ARK_API_KEY;
+  chain = buildProviderChain(baseConfig, true);
+  assert.ok(!chain.includes('seedance_ark'), '无 ARK_API_KEY 时跳过 ark');
+  assert.strictEqual(chain[0], 'pexels_video', '库存顶到链首');
+  assert.ok(chain.includes('seedance_bl'), 'bl 仍在链中兜底');
+  assert.ok(chain.indexOf('seedance_bl') > chain.indexOf('pexels'), 'bl 在库存之后');
+
+  // seedance.enabled=false：两种生成都跳过
+  chain = buildProviderChain({ ...baseConfig, seedance: { enabled: false } }, true);
+  assert.ok(!chain.includes('seedance_ark') && !chain.includes('seedance_bl'), 'enabled=false 跳过全部生成式');
+
+  // 非视频窗口：不含任何视频 provider
+  process.env.ARK_API_KEY = 'test-key';
+  chain = buildProviderChain(baseConfig, false);
+  assert.ok(!chain.includes('seedance_ark') && !chain.includes('seedance_bl') && !chain.includes('pexels_video'), '图片窗口不含视频 provider');
+  delete process.env.ARK_API_KEY;
 }
 
 console.log('全部通过 ✅');

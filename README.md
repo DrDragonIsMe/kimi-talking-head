@@ -17,7 +17,7 @@
 - **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote / cream / editorial / documentary` 六套字幕 DNA 可选，hero 全屏时刻由 `HeroOverlay` 统一渲染、任意 DNA 下均与入场音效同步可见。
 - **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移（视频画面自动跳过，避免运动叠加发晃），场景间 fade/wipe/zoom 三种转场确定性轮换。
 - **镜头级场景画面**：有分镜时按 storyboard 镜头合并成 6–15s 画面窗口（一句话一换，紧贴讲述内容），LLM 用整段口播 + 镜头描述生成检索词，stock 候选按匹配度重排；无分镜时回退 42s 定长切分。
-- **视频 B-roll**：`scene_visuals.media_type` 支持 `video / mixed`（默认 mixed，奇偶交替）；Pexels 库存视频优先检索，搜不到时用 `bl` Seedance 按镜头 visual_prompt 生成 5s 竖屏视频兜底，图片 provider 最后兜底。
+- **视频 B-roll**：`scene_visuals.media_type` 默认 `video`（全视频 B-roll）；视频窗口固定优先级 `seedance_ark（火山 480p，便宜贴合）→ pexels 库存 → seedance_bl（最贵，垫底）→ 图片 → 占位`，可用性自动检测（无 `ARK_API_KEY` 跳过 ark、无 `bl` 跳过 bl）。支持 `image / mixed` 回退。
 - **音频可视化**：底部实时波形条（`visualizeAudio` 驱动，可关闭）。
 - **BGM 与音效**：BGM 循环垫底、首尾淡入淡出；hero 时刻自动配入场音效（`assets/sfx/hero.*` 优先，缺失时 ffmpeg 合成兜底）。
 - **竖屏分镜布局**：`portrait-hybrid` 模式支持 `default / host-focus / visual-focus / minimal / balanced` 五种预设。
@@ -370,8 +370,8 @@ bash scripts/generate_customer_voices.sh  # 6 段变调女声参考音频
 - `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）。hero 关键词全屏时刻由 `HeroOverlay` 统一渲染，任意 DNA 下都会与入场音效同步出现
 - `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
 - `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
-- `scene_visuals.media_type`：场景素材类型，`image` / `video`（全视频 B-roll）/ `mixed`（默认，奇偶交替）；视频窗口按 `pexels_video → seedance_video → 图片链` 兜底
-- `scene_visuals.seedance.*`：生成式视频配置。`backend`：`bl`（默认，百炼 `bl video generate`，720P/1080P）/ `ark`（火山方舟 Seedance 直连 API，模型 `ark_model` 默认 `doubao-seedance-1-0-pro-fast-251015`，`ark_resolution` 默认 `480p`，API key 读 `.env` 的 `ARK_API_KEY`）；`enabled=false` 时跳过生成式视频
+- `scene_visuals.media_type`：场景素材类型，`video`（默认，全视频 B-roll）/ `mixed`（奇偶交替）/ `image`；视频窗口固定优先级 `seedance_ark → pexels 库存 → seedance_bl → 图片 → 占位`
+- `scene_visuals.seedance.*`：生成式视频配置。后端自动按可用性选择：`seedance_ark`（火山方舟 Seedance REST API，`ark_model` 默认 `doubao-seedance-1-0-pro-fast-251015`，`ark_resolution` 默认 `480p`，key 读 `.env` 的 `ARK_API_KEY`，无 key 自动跳过）；`seedance_bl`（百炼 `bl video generate`，720P/1080P，最贵，仅作链尾兜底）；旧别名 `seedance_video` 按 `backend`（默认 `ark`）选择后端；`enabled=false` 时跳过全部生成式视频
 - `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）
 - `video_layout.hybrid.showWaveform`：底部音频波形条（默认开）
 - `video_layout.hybrid.chapterCardScale`：章节观点卡片整体缩放系数（卡宽、内边距、字号同比，默认 1.3）；卡片堆叠起点为画布高度 1/6 处

@@ -161,7 +161,7 @@ bash /root/aigc_apps/start.sh
 
 - **画面粒度**：有分镜时把相邻短镜头合并成 6–15s 的画面窗口（一句话一换，紧贴口播）；无分镜时回退 42s 定长切分。
 - **检索词**：LLM 用整段口播 + 镜头 subject/setting/visual_prompt 生成英文 query，stock 候选 top-10 按匹配度重排。
-- **视频 B-roll**：`scene_visuals.media_type` 为 `video` / `mixed`（默认 mixed，奇偶交替）时，视频窗口按 `pexels_video → seedance_video → 图片链` 兜底；`seedance_video` 有两种后端：`backend=bl`（百炼 `bl video generate`，720P/1080P）或 `backend=ark`（火山方舟 Seedance REST API，默认 `doubao-seedance-1-0-pro-fast-251015` @ `480p`，key 读 `.env` 的 `ARK_API_KEY`），按镜头 visual_prompt 生成 5s 竖屏片段（`scene_visuals.seedance.*` 配置）。
+- **视频 B-roll**：`scene_visuals.media_type` 默认 `video`（全视频 B-roll），视频窗口固定优先级 `seedance_ark → pexels 库存 → seedance_bl → 图片 → 占位`：`seedance_ark` 走火山方舟 Seedance REST API（默认 `doubao-seedance-1-0-pro-fast-251015` @ `480p`，key 读 `.env` 的 `ARK_API_KEY`，无 key 自动跳过）；库存（pexels 视频/图片）居中兜底；`seedance_bl`（百炼，720P/1080P）最贵只作链尾兜底。按镜头 visual_prompt 生成 5s 竖屏片段（`scene_visuals.seedance.*` 配置）。
 - **缓存**：下载与生成结果按 sha1(query+类型) 写入全局 `public/scene_visuals/_cache/`（LRU 500 文件 / 2GB），跨任务复用。
 - **渲染**：视频画面自动跳过 Ken Burns，仅保留交叉淡化；`SceneMedia` 组件统一处理图片/视频。
 

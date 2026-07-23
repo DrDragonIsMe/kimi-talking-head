@@ -115,7 +115,7 @@
     }
   },
   "scene_visuals": {
-    "media_type": "mixed",
+    "media_type": "video",
     "providers": ["pexels", "unsplash", "wanx", "placeholder"],
     "pexels": {
       "api_key": "your-pexels-api-key",
@@ -131,7 +131,7 @@
     },
     "seedance": {
       "enabled": true,
-      "backend": "bl",
+      "backend": "ark",
       "model": "",
       "ratio": "9:16",
       "resolution": "720P",

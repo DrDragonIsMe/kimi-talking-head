@@ -920,18 +920,10 @@ async function fetchWithArkSeedance(query, prompt, filePath, config) {
   };
 }
 
-// Seedance 生成式视频兜底：stock 视频搜不到贴合内容时，用 bl video generate
-// 按 storyboard 的 visual_prompt 直接生成 5s 竖屏片段（与人物形象生成同一套 bl 模式）。
-// backend=ark 时改走火山方舟 Seedance API（见 fetchWithArkSeedance）。
-async function fetchWithSeedanceVideo(query, prompt, filePath, config) {
-  if (config.enabled === false) {
-    throw new Error('seedance_video 已在配置中禁用');
-  }
-  if (config.backend === 'ark') {
-    return fetchWithArkSeedance(query, prompt, filePath, config);
-  }
+// bl 后端（百炼 video generate）：成本最高的生成式视频，链尾兜底用。
+async function fetchWithBlSeedance(query, prompt, filePath, config) {
   if (!commandExists('bl')) {
-    throw new Error('bl 未安装，无法使用 seedance_video provider');
+    throw new Error('bl 未安装，无法使用 seedance_bl provider');
   }
   const ratio = config.ratio || '9:16';
   const duration = config.duration || 5;
@@ -998,6 +990,18 @@ async function fetchWithSeedanceVideo(query, prompt, filePath, config) {
   };
 }
 
+// 旧别名 seedance_video：按 seedance.backend 选择后端（默认 ark）。
+// 新链路请直接用 seedance_ark / seedance_bl（见 buildProviderChain）。
+async function fetchWithSeedanceVideo(query, prompt, filePath, config) {
+  if (config.enabled === false) {
+    throw new Error('seedance_video 已在配置中禁用');
+  }
+  if ((config.backend || 'ark') === 'ark') {
+    return fetchWithArkSeedance(query, prompt, filePath, config);
+  }
+  return fetchWithBlSeedance(query, prompt, filePath, config);
+}
+
 function hslToHex(h, s, l) {
   s /= 100;
   l /= 100;
@@ -1056,6 +1060,8 @@ const PROVIDERS = {
   pexels: fetchWithPexels,
   pexels_video: fetchWithPexelsVideo,
   seedance_video: fetchWithSeedanceVideo,
+  seedance_ark: fetchWithArkSeedance,
+  seedance_bl: fetchWithBlSeedance,
   unsplash: fetchWithUnsplash,
   wanx: fetchWithWanx,
   placeholder: fetchWithPlaceholder,
@@ -1065,6 +1071,8 @@ const PROVIDERS = {
 const PROVIDER_MEDIA = {
   pexels_video: { ext: '.mp4', type: 'video' },
   seedance_video: { ext: '.mp4', type: 'video' },
+  seedance_ark: { ext: '.mp4', type: 'video' },
+  seedance_bl: { ext: '.mp4', type: 'video' },
 };
 const providerMedia = (providerName) => PROVIDER_MEDIA[providerName] || { ext: '.png', type: 'image' };
 
@@ -1075,32 +1083,50 @@ function isValidMedia(filePath) {
   return filePath.endsWith('.mp4') ? size > 50 * 1024 : size > 2000;
 }
 
-// preferVideo=true 时把视频 provider 插到链首（库存视频优先，生成式视频兜底），图片 provider 兜底
-async function fetchSceneVisual(query, prompt, basePathNoExt, config, preferVideo) {
+// 生成 provider 链。preferVideo=true 时按成本与贴合度固定优先级：
+//   seedance_ark（火山 480p，便宜且贴合）→ pexels_video / 图片库存 → seedance_bl（最贵，垫底）→ placeholder
+// 可用性自动检测：无 ARK_API_KEY 跳过 ark，无 bl CLI 跳过 bl，seedance.enabled=false 跳过全部生成式。
+function buildProviderChain(config, preferVideo) {
   let providers = (config.providers || ['placeholder']).filter((p) => PROVIDERS[p]);
   if (!providers.length) providers = ['placeholder'];
-  if (preferVideo) {
-    for (const videoProvider of ['seedance_video', 'pexels_video']) {
-      if (!providers.includes(videoProvider)) {
-        providers = [videoProvider, ...providers];
-      }
-    }
-  } else {
+
+  if (!preferVideo) {
     // 非视频窗口下即使配置了视频 provider 也跳过，避免图文混排
     providers = providers.filter((p) => providerMedia(p).type !== 'video');
-    if (!providers.length) providers = ['placeholder'];
+    return providers.length ? providers : ['placeholder'];
   }
+
+  const seedanceCfg = config.seedance || {};
+  const generativeEnabled = seedanceCfg.enabled !== false;
+  const arkAvailable = generativeEnabled && Boolean(process.env.ARK_API_KEY || seedanceCfg.api_key);
+  const blAvailable = generativeEnabled && commandExists('bl');
+  const base = providers.filter(
+    (p) => !['seedance_video', 'seedance_ark', 'seedance_bl', 'pexels_video', 'placeholder'].includes(p)
+  );
+
+  const chain = [];
+  if (arkAvailable) chain.push('seedance_ark');
+  chain.push('pexels_video');
+  chain.push(...base);
+  if (blAvailable) chain.push('seedance_bl');
+  chain.push('placeholder');
+  return [...new Set(chain)];
+}
+
+// preferVideo=true 时按 buildProviderChain 的优先级逐个尝试（ark → 库存 → bl → 图片 → 占位）
+async function fetchSceneVisual(query, prompt, basePathNoExt, config, preferVideo) {
+  const providers = buildProviderChain(config, preferVideo);
 
   for (const providerName of providers) {
     const media = providerMedia(providerName);
     const filePath = `${basePathNoExt}${media.ext}`;
     try {
       console.log(`  尝试 ${providerName}: "${query.slice(0, 60)}${query.length > 60 ? '...' : ''}"`);
-      // 视频 provider 复用各自配置段（pexels_video 复用 pexels 的 api_key）
+      // 视频 provider 复用各自配置段（pexels_video 复用 pexels 的 api_key；seedance_* 复用 seedance 段）
       const providerConfig =
         providerName === 'pexels_video'
           ? { ...(config.pexels || {}), ...(config.pexels_video || {}) }
-          : providerName === 'seedance_video'
+          : providerName.startsWith('seedance')
             ? { ...(config.seedance || {}) }
             : config[providerName] || {};
       const meta = await PROVIDERS[providerName](query, prompt, filePath, providerConfig);
@@ -1319,8 +1345,9 @@ const main = async () => {
   const processScene = async (i, llmResult) => {
     const info = buildSceneInfo(i, llmResult);
 
-    // media_type: image | video（全视频 B-roll）| mixed（奇偶交替，默认）
-    const mediaType = config.media_type || 'mixed';
+    // media_type: image | video（全视频 B-roll，默认）| mixed（奇偶交替）
+    // video 窗口链路：seedance_ark → pexels 库存 → seedance_bl（最贵垫底）→ 图片 → 占位
+    const mediaType = config.media_type || 'video';
     const preferVideo = mediaType === 'video' || (mediaType === 'mixed' && i % 2 === 0);
 
     // 复用检查：两种扩展名都算（按偏好排序）
@@ -1438,6 +1465,7 @@ if (isMain) {
 
 module.exports = {
   buildVisualWindows,
+  buildProviderChain,
   scoreStockCandidate,
   pickBestCandidate,
   sceneCacheKey,
