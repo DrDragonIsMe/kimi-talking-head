@@ -1113,7 +1113,7 @@ function buildProviderChain(config, preferVideo) {
   return [...new Set(chain)];
 }
 
-// preferVideo=true 时按 buildProviderChain 的优先级逐个尝试（ark → 库存 → bl → 图片 → 占位）
+// preferVideo=true 时按 buildProviderChain 的优先级逐个尝试（ark → 视频/图片库存 → bl → 占位）
 async function fetchSceneVisual(query, prompt, basePathNoExt, config, preferVideo) {
   const providers = buildProviderChain(config, preferVideo);
 
@@ -1346,7 +1346,7 @@ const main = async () => {
     const info = buildSceneInfo(i, llmResult);
 
     // media_type: image | video（全视频 B-roll，默认）| mixed（奇偶交替）
-    // video 窗口链路：seedance_ark → pexels 库存 → seedance_bl（最贵垫底）→ 图片 → 占位
+    // video 窗口链路：seedance_ark → pexels 视频/图片库存 → seedance_bl（最贵垫底）→ 占位
     const mediaType = config.media_type || 'video';
     const preferVideo = mediaType === 'video' || (mediaType === 'mixed' && i % 2 === 0);
 

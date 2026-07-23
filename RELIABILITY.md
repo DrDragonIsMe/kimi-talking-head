@@ -14,12 +14,10 @@ This document describes the guards, automation, and operational runbooks for the
 
 Before any run, the pipeline validates:
 
-- Required env vars (`OPENAI_API_KEY`, `ARK_API_KEY`, `ARK_ENDPOINT_ID`, etc.).
-- Host profile, servers config, and template files exist.
-- GPU server SSH connectivity and InfiniteTalk / IndexTTS paths.
-- Local and remote dependencies (ComfyUI, Python venv, model files).
 - Caption DNA id (`scripts/lib/validate_config.sh`): `content_overlay.subtitles.dna` must be one of `classic|loud|keynote|cream|editorial|documentary`; an invalid value aborts the run with a clear error instead of silently falling back to classic.
 - Article quality (`scripts/validate_article.js`, runs before the `script` phase): effective length 100–10000 chars, code-block share < 30%, table rows < 10, Chinese share ≥ 50%. Warn-only by default; `STRICT_ARTICLE_CHECK=1` makes it fatal. The web admin runs the same check on `POST /api/v1/jobs` — 400 by default, `ARTICLE_VALIDATE_MODE=warn` downgrades to a warning, `ARTICLE_VALIDATE_SCRIPT` overrides the script path.
+
+环境依赖不做 pre-flight 硬校验，而是在使用点 fail-fast：LLM 走 `KIMI_CODE_BASE_URL` / `KIMI_CODE_API_KEY`（未配置时脚本/分镜/关键词各环节回退到本地启发式逻辑）；GPU 服务器 SSH 与路径在 `tts_index.sh` / `infinitetalk.sh` / `musetalk.sh` 选用节点时检查（不可达则尝试 backup 或明确报错，可用 `bash scripts/check_server.sh` 排查）；`ARK_API_KEY` 仅 `seedance_ark` provider 需要，缺失时自动从链路跳过而非中断。
 
 ## 3. Subtitle Alignment
 
@@ -52,7 +50,7 @@ The 「客户说」 series uses a randomized AI host pool instead of a single re
 
 - **Identity**: `scripts/generate_customer_persona.js` randomly picks a surname, given name, title, industry, and company name, then masks the middle characters with `*` (e.g. `李*涵`, `星*科技`). The resulting label is written to `video_layout.hybrid.brandBadge.text`.
 - **Visuals**: `scripts/generate_customer_avatars.sh` generates 12 short 640×640 young-female talking-head template videos via `bl video generate`, scales them to 640×640, removes audio, and extracts the first frame as a photo fallback. The pipeline randomly picks one video and one photo per run.
-- **Voice**: `scripts/generate_customer_voices.sh` produces 6 pitch-shifted variants of `assets/voice/female_ref_jennifer.wav` using ffmpeg (`asetrate+atempo+aresample`). The pipeline randomly picks one reference per run for IndexTTS cloning.
+- **Voice**: `scripts/generate_customer_voices.sh` produces 6 reference clips — 1 unshifted copy of `assets/voice/female_ref_jennifer.wav` plus 5 pitch-shifted variants using ffmpeg (`asetrate+atempo+aresample`). The pipeline randomly picks one reference per run for IndexTTS cloning.
 - **One-shot setup**: `npm run setup:customer` (or `bash scripts/setup_customer_assets.sh`) generates both pools. Output directories (`assets/host/customers/`, `assets/voice/customers/`) are gitignored, so a fresh clone must run this once before rendering a customer video.
 - **Runtime**: `scripts/pipeline.sh` creates `temp/<run>/profile_effective.json` from the original profile plus the random persona, then uses that effective profile for TTS, lip-sync, and render. The original profile is never mutated.
 

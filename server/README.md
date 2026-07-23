@@ -127,8 +127,8 @@ ssh -p 54365 root@8.149.64.203 \
 | `install.sh` | One-shot server setup script |
 | `MODEL_CHECKLIST.md` | Required model files and locations |
 | `server_maintenance.md` | Operational runbooks |
+| `versions.env` | Optional dependency version pins consumed by `install.sh` |
 | `comfyui/start.sh` | ComfyUI startup script copied to `/root/aigc_apps/start.sh` |
-| `comfyui/env.sh` | Environment helper copied to `/root/aigc_apps/env.sh` |
 | `comfyui/env.sh` | Environment helper copied to `/root/aigc_apps/env.sh` |
 | `comfyui/monitor.sh` | Optional remote-job monitor |
 | `comfyui/README.md` | ComfyUI server scripts doc |

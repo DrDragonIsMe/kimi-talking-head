@@ -17,7 +17,7 @@
 - **词级卡拉 OK 字幕**：逐词入场 + 当前词强调，LLM 自动挑选 hero 词做全屏时刻；`classic / loud / keynote / cream / editorial / documentary` 六套字幕 DNA 可选，hero 全屏时刻由 `HeroOverlay` 统一渲染、任意 DNA 下均与入场音效同步可见。
 - **场景运动与交叉淡化**：场景画面 Ken Burns 缓推/平移（视频画面自动跳过，避免运动叠加发晃），场景间 fade/wipe/zoom 三种转场确定性轮换。
 - **镜头级场景画面**：有分镜时按 storyboard 镜头合并成 6–15s 画面窗口（一句话一换，紧贴讲述内容），LLM 用整段口播 + 镜头描述生成检索词，stock 候选按匹配度重排；无分镜时回退 42s 定长切分。
-- **视频 B-roll**：`scene_visuals.media_type` 默认 `video`（全视频 B-roll）；视频窗口固定优先级 `seedance_ark（火山 480p，便宜贴合）→ pexels 库存 → seedance_bl（最贵，垫底）→ 图片 → 占位`，可用性自动检测（无 `ARK_API_KEY` 跳过 ark、无 `bl` 跳过 bl）。支持 `image / mixed` 回退。
+- **视频 B-roll**：`scene_visuals.media_type` 默认 `video`（全视频 B-roll）；视频窗口固定优先级 `seedance_ark（火山 480p，便宜贴合）→ pexels 视频/图片库存 → seedance_bl（最贵，垫底）→ 占位`，可用性自动检测（无 `ARK_API_KEY` 跳过 ark、无 `bl` 跳过 bl）。支持 `image / mixed` 回退。
 - **音频可视化**：底部实时波形条（`visualizeAudio` 驱动，可关闭）。
 - **BGM 与音效**：BGM 循环垫底、首尾淡入淡出；hero 时刻自动配入场音效（`assets/sfx/hero.*` 优先，缺失时 ffmpeg 合成兜底）。
 - **竖屏分镜布局**：`portrait-hybrid` 模式支持 `default / host-focus / visual-focus / minimal / balanced` 五种预设。
@@ -271,7 +271,7 @@ bash scripts/generate_customer_avatars.sh   # 12 段 640×640 女性口播模板
 bash scripts/generate_customer_voices.sh  # 6 段变调女声参考音频
 ```
 
-- `scripts/generate_customer_avatars.sh`：基于 `bl video generate`（`happyhorse-1.1-t2v`）批量生成年轻、漂亮、商务感女性 5s 口播视频，下载后统一缩放到 640×640、去掉音轨，并提取首帧作为照片 fallback。
+- `scripts/generate_customer_avatars.sh`：基于 `bl video generate`（bl CLI 默认视频模型）批量生成年轻、漂亮、商务感女性 5s 口播视频，下载后统一缩放到 640×640、去掉音轨，并提取首帧作为照片 fallback。
 - `scripts/generate_customer_voices.sh`：基于 `assets/voice/female_ref_jennifer.wav` 用 ffmpeg `asetrate+atempo+aresample` 生成 5 种不同音调的克隆参考音频，加上原始音色共 6 段。
 - 生成产物在 `.gitignore` 中排除，不会污染仓库；换电脑时重新执行上述脚本即可获得同等效果。
 - 想调整人物风格，修改 `scripts/generate_customer_avatars.sh` 顶部的 `PROMPTS` 数组后重新运行；想调整音色范围，修改 `scripts/generate_customer_voices.sh` 中的 `PITCHES` 数组。
@@ -370,7 +370,7 @@ bash scripts/generate_customer_voices.sh  # 6 段变调女声参考音频
 - `content_overlay.subtitles.dna`：字幕 DNA，`classic`（默认整句卡片）/ `loud`（逐词冲击 + hero 全屏）/ `keynote`（发布式揭示 + hero wipe-up）/ `cream`（暖奶油诗意）/ `editorial`（杂志衬线）/ `documentary`（纪实庄重）。hero 关键词全屏时刻由 `HeroOverlay` 统一渲染，任意 DNA 下都会与入场音效同步出现
 - `style.bgm` / `style.bgm_volume`：BGM 路径与音量（默认 0.12，置 0 关闭）
 - `style.sfx_enabled` / `style.sfx_volume`：hero 入场音效开关与音量
-- `scene_visuals.media_type`：场景素材类型，`video`（默认，全视频 B-roll）/ `mixed`（奇偶交替）/ `image`；视频窗口固定优先级 `seedance_ark → pexels 库存 → seedance_bl → 图片 → 占位`
+- `scene_visuals.media_type`：场景素材类型，`video`（默认，全视频 B-roll）/ `mixed`（奇偶交替）/ `image`；视频窗口固定优先级 `seedance_ark → pexels 视频/图片库存 → seedance_bl → 占位`
 - `scene_visuals.seedance.*`：生成式视频配置。后端自动按可用性选择：`seedance_ark`（火山方舟 Seedance REST API，`ark_model` 默认 `doubao-seedance-1-0-pro-fast-251015`，`ark_resolution` 默认 `480p`，key 读 `.env` 的 `ARK_API_KEY`，无 key 自动跳过）；`seedance_bl`（百炼 `bl video generate`，720P/1080P，最贵，仅作链尾兜底）；旧别名 `seedance_video` 按 `backend`（默认 `ark`）选择后端；`enabled=false` 时跳过全部生成式视频
 - `video_layout.hybrid.showProgressBar`：底部线性进度条（默认开）
 - `video_layout.hybrid.showWaveform`：底部音频波形条（默认开）
@@ -447,8 +447,8 @@ npm run build      # TypeScript 检查
 
 | 目的 | 命令 |
 |------|------|
-| 全部离线套件 + 类型检查 | `npm test`（19 套件 + `tsc`，含字幕/同步/关键词/标题/卡拉OK/音频/场景运动/布局/hero/版本化/DNA/字幕校验/文章预检/素材缓存/API/状态机/DNA 配置校验/远程任务/组合守卫/TS 类型检查） |
-| 快速回归（跳过 API 集成与 tsc） | `npm run test:fast`（18 套件） |
+| 全部离线套件 + 类型检查 | `npm test`（20 套件 + `tsc`，含字幕/同步/关键词/标题/卡拉OK/音频/场景运动/布局/hero/版本化/DNA/字幕校验/文章预检/素材缓存/画面窗口/API/状态机/DNA 配置校验/远程任务/组合守卫/TS 类型检查） |
+| 快速回归（跳过 API 集成与 tsc） | `npm run test:fast`（19 套件） |
 | 视觉回归（SSIM 像素对比） | `npm run test:visual` |
 | 有意变更模板后重落基线 | `UPDATE_BASELINE=1 npm run test:visual` |
 | 单独跑某个套件 | `node scripts/test_karaoke_words.js` 等 |

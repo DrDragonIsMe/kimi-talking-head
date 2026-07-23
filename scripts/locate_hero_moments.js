@@ -5,7 +5,7 @@
  * 输出 Remotion 渲染用的 hero 时刻清单（含标题卡偏移）。
  *
  * Usage:
- *   node locate_hero_moments.js <storyboard.json> <words.json> <output.json> [offset-seconds]
+ *   node locate_hero_moments.js <storyboard.json> <words.json> <output.json> [offset-seconds] [max-duration-seconds]
  *
  * 规则：
  * - 只在所属 shot 的时间窗内定位（容忍 ±0.5s），窗外命中丢弃；
